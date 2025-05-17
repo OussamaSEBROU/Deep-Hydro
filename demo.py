@@ -169,59 +169,105 @@ def create_visitor_charts(visitor_df):
     
     figures = []
     
-    # Create a copy of the DataFrame to avoid modifying the original
-    df = visitor_df.copy()
+    try:
+        # Create a copy of the DataFrame to avoid modifying the original
+        df = visitor_df.copy()
+        
+        # Add date column for daily aggregation
+        df['date'] = df['timestamp'].dt.date
+        
+        # 1. Daily visitors chart
+        daily_visitors = df.groupby('date').size().reset_index(name='count')
+        daily_visitors['date'] = pd.to_datetime(daily_visitors['date'])
+        
+        fig1 = px.line(daily_visitors, x='date', y='count', 
+                      title='Daily Visitors',
+                      labels={'count': 'Number of Visitors', 'date': 'Date'})
+        fig1.update_layout(xaxis_title='Date', yaxis_title='Number of Visitors')
+        figures.append(fig1)
+        
+        # 2. Page popularity chart
+        page_counts = df['page'].value_counts().reset_index()
+        page_counts.columns = ['page', 'count']
+        
+        fig2 = px.bar(page_counts, x='page', y='count',
+                     title='Page Popularity',
+                     labels={'count': 'Number of Views', 'page': 'Page'})
+        fig2.update_layout(xaxis_title='Page', yaxis_title='Number of Views')
+        figures.append(fig2)
+        
+        # 3. User actions chart
+        action_counts = df['action'].value_counts().reset_index()
+        action_counts.columns = ['action', 'count']
+        
+        fig3 = px.pie(action_counts, values='count', names='action',
+                     title='User Actions')
+        figures.append(fig3)
+        
+        # 4. Hourly activity heatmap - FIXED to handle any data shape
+        try:
+            df['hour'] = df['timestamp'].dt.hour
+            df['day_of_week'] = df['timestamp'].dt.day_name()
+            
+            # Order days of week properly
+            day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+            
+            hourly_activity = df.groupby(['day_of_week', 'hour']).size().reset_index(name='count')
+            
+            # Check if we have data for all hours and days
+            if len(hourly_activity) > 0:
+                hourly_pivot = hourly_activity.pivot_table(values='count', index='day_of_week', columns='hour', fill_value=0)
+                
+                # Reindex to ensure proper day order for available days
+                available_days = set(hourly_pivot.index) & set(day_order)
+                ordered_available_days = [day for day in day_order if day in available_days]
+                hourly_pivot = hourly_pivot.reindex(ordered_available_days)
+                
+                # Get the actual hours present in the data
+                available_hours = sorted(hourly_pivot.columns)
+                
+                # Create the heatmap with the actual available hours
+                fig4 = px.imshow(hourly_pivot, 
+                                labels=dict(x="Hour of Day", y="Day of Week", color="Visit Count"),
+                                x=[str(h) for h in available_hours],  # Use only available hours
+                                y=ordered_available_days,  # Use only available days
+                                title="Visitor Activity by Hour and Day")
+                
+                figures.append(fig4)
+            else:
+                # Create a placeholder figure if no hourly data
+                fig4 = go.Figure()
+                fig4.update_layout(
+                    title="Visitor Activity by Hour and Day (No Data)",
+                    xaxis_title="Hour of Day",
+                    yaxis_title="Day of Week"
+                )
+                fig4.add_annotation(
+                    text="Not enough data to generate hourly activity heatmap",
+                    xref="paper", yref="paper",
+                    x=0.5, y=0.5, showarrow=False
+                )
+                figures.append(fig4)
+        except Exception as heatmap_err:
+            # Create a fallback figure if the heatmap fails
+            st.warning(f"Could not generate hourly activity heatmap: {heatmap_err}")
+            fig4 = go.Figure()
+            fig4.update_layout(
+                title="Visitor Activity by Hour and Day (Error)",
+                xaxis_title="Hour of Day",
+                yaxis_title="Day of Week"
+            )
+            fig4.add_annotation(
+                text="Error generating hourly activity heatmap",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5, showarrow=False
+            )
+            figures.append(fig4)
     
-    # Add date column for daily aggregation
-    df['date'] = df['timestamp'].dt.date
-    
-    # 1. Daily visitors chart
-    daily_visitors = df.groupby('date').size().reset_index(name='count')
-    daily_visitors['date'] = pd.to_datetime(daily_visitors['date'])
-    
-    fig1 = px.line(daily_visitors, x='date', y='count', 
-                  title='Daily Visitors',
-                  labels={'count': 'Number of Visitors', 'date': 'Date'})
-    fig1.update_layout(xaxis_title='Date', yaxis_title='Number of Visitors')
-    figures.append(fig1)
-    
-    # 2. Page popularity chart
-    page_counts = df['page'].value_counts().reset_index()
-    page_counts.columns = ['page', 'count']
-    
-    fig2 = px.bar(page_counts, x='page', y='count',
-                 title='Page Popularity',
-                 labels={'count': 'Number of Views', 'page': 'Page'})
-    fig2.update_layout(xaxis_title='Page', yaxis_title='Number of Views')
-    figures.append(fig2)
-    
-    # 3. User actions chart
-    action_counts = df['action'].value_counts().reset_index()
-    action_counts.columns = ['action', 'count']
-    
-    fig3 = px.pie(action_counts, values='count', names='action',
-                 title='User Actions')
-    figures.append(fig3)
-    
-    # 4. Hourly activity heatmap
-    df['hour'] = df['timestamp'].dt.hour
-    df['day_of_week'] = df['timestamp'].dt.day_name()
-    
-    # Order days of week properly
-    day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-    
-    hourly_activity = df.groupby(['day_of_week', 'hour']).size().reset_index(name='count')
-    hourly_pivot = hourly_activity.pivot_table(values='count', index='day_of_week', columns='hour', fill_value=0)
-    
-    # Reindex to ensure proper day order
-    hourly_pivot = hourly_pivot.reindex(day_order)
-    
-    fig4 = px.imshow(hourly_pivot, 
-                    labels=dict(x="Hour of Day", y="Day of Week", color="Visit Count"),
-                    x=[str(h) for h in range(24)],
-                    y=day_order,
-                    title="Visitor Activity by Hour and Day")
-    figures.append(fig4)
+    except Exception as e:
+        st.error(f"Error creating visitor charts: {e}")
+        # Return an empty list if chart creation fails
+        return []
     
     return figures
 
@@ -246,7 +292,8 @@ def render_admin_analytics():
             correct_password = os.getenv("ADMIN_PASSWORD", "admin123")
             if admin_password == correct_password:
                 st.session_state.admin_authenticated = True
-                st.experimental_rerun()
+                # FIXED: Use st.rerun() instead of st.experimental_rerun()
+                st.rerun()
             else:
                 st.error("Invalid password")
     else:
@@ -279,10 +326,14 @@ def render_admin_analytics():
         
         # Create and display visualizations
         st.subheader("Visitor Analytics")
-        charts = create_visitor_charts(visitor_df)
         
-        for fig in charts:
-            st.plotly_chart(fig, use_container_width=True)
+        try:
+            charts = create_visitor_charts(visitor_df)
+            
+            for fig in charts:
+                st.plotly_chart(fig, use_container_width=True)
+        except Exception as chart_err:
+            st.error(f"Error displaying charts: {chart_err}")
         
         # Display raw data with filters
         st.subheader("Raw Visitor Data")
@@ -290,40 +341,52 @@ def render_admin_analytics():
         # Add filters
         col1, col2 = st.columns(2)
         with col1:
-            date_range = st.date_input(
-                "Date Range",
-                [visitor_df['timestamp'].min().date(), visitor_df['timestamp'].max().date()]
-            )
+            try:
+                date_range = st.date_input(
+                    "Date Range",
+                    [visitor_df['timestamp'].min().date(), visitor_df['timestamp'].max().date()]
+                )
+            except Exception as date_err:
+                st.warning(f"Could not set date range: {date_err}")
+                date_range = None
         
         with col2:
-            page_filter = st.multiselect(
-                "Filter by Page",
-                options=visitor_df['page'].unique(),
-                default=[]
-            )
+            try:
+                page_filter = st.multiselect(
+                    "Filter by Page",
+                    options=visitor_df['page'].unique(),
+                    default=[]
+                )
+            except Exception as page_err:
+                st.warning(f"Could not set page filter: {page_err}")
+                page_filter = []
         
         # Apply filters
-        filtered_df = visitor_df.copy()
-        
-        if len(date_range) == 2:
-            start_date, end_date = date_range
-            filtered_df = filtered_df[
-                (filtered_df['timestamp'].dt.date >= start_date) & 
-                (filtered_df['timestamp'].dt.date <= end_date)
-            ]
-        
-        if page_filter:
-            filtered_df = filtered_df[filtered_df['page'].isin(page_filter)]
-        
-        # Display the filtered data
-        st.dataframe(filtered_df[['timestamp', 'ip_address', 'page', 'action', 'session_id']])
-        
-        # Export options
-        if st.button("Export to CSV"):
-            csv = filtered_df.to_csv(index=False)
-            b64 = base64.b64encode(csv.encode()).decode()
-            href = f'<a href="data:file/csv;base64,{b64}" download="visitor_logs.csv">Download CSV File</a>'
-            st.markdown(href, unsafe_allow_html=True)
+        try:
+            filtered_df = visitor_df.copy()
+            
+            if date_range and len(date_range) == 2:
+                start_date, end_date = date_range
+                filtered_df = filtered_df[
+                    (filtered_df['timestamp'].dt.date >= start_date) & 
+                    (filtered_df['timestamp'].dt.date <= end_date)
+                ]
+            
+            if page_filter:
+                filtered_df = filtered_df[filtered_df['page'].isin(page_filter)]
+            
+            # Display the filtered data
+            st.dataframe(filtered_df[['timestamp', 'ip_address', 'page', 'action', 'session_id']])
+            
+            # Export options
+            if st.button("Export to CSV"):
+                csv = filtered_df.to_csv(index=False)
+                b64 = base64.b64encode(csv.encode()).decode()
+                href = f'<a href="data:file/csv;base64,{b64}" download="visitor_logs.csv">Download CSV File</a>'
+                st.markdown(href, unsafe_allow_html=True)
+        except Exception as filter_err:
+            st.error(f"Error applying filters: {filter_err}")
+            st.dataframe(visitor_df[['timestamp', 'ip_address', 'page', 'action', 'session_id']])
 
 # --- Custom CSS for Professional UI with Dark/Light Mode Support ---
 def apply_custom_css():
