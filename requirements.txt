@@ -11,4 +11,3 @@ kaleido
 firebase-admin
 python-dotenv
 requests
-openpyxl
