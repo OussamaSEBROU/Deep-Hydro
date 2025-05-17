@@ -593,24 +593,21 @@ def render_admin_analytics():
     if not st.session_state.admin_authenticated:
         st.info("Please sign in with your Google account to view analytics.")
         
-        # In a real implementation, you would integrate with Firebase Authentication
-        # For this example, we'll use a simple email-based authentication
+        # Email-only authentication (no password)
         admin_email = st.text_input("Admin Email")
-        admin_password = st.text_input("Admin Password", type="password")
         
         if st.button("Login"):
-            # In production, replace this with proper Firebase Authentication
+            # Check if email is in the admin list
             admin_emails = os.getenv("ADMIN_EMAILS", "admin@example.com").split(",")
-            correct_password = os.getenv("ADMIN_PASSWORD", "admin123")
             
-            if admin_email in admin_emails and admin_password == correct_password:
+            if admin_email in admin_emails:
                 st.session_state.admin_authenticated = True
                 st.session_state.admin_email = admin_email
                 # Log admin login
                 log_visitor_activity("Admin Dashboard", "admin_login")
                 st.rerun()
             else:
-                st.error("Invalid email or password")
+                st.error("Invalid email")
     else:
         # Create tabs for different analytics views
         tabs = st.tabs(["Visitor Analytics", "User Data", "System Status"])
