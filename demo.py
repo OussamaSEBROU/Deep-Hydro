@@ -934,7 +934,7 @@ def apply_custom_css():
 def add_javascript_functionality():
     st.markdown("""
     <script>
-    // Function to copy text to clipboard
+    #// Function to copy text to clipboard
     function copyToClipboard(text) {
         const textarea = document.createElement('textarea');
         textarea.value = text;
@@ -944,10 +944,10 @@ def add_javascript_functionality():
         document.body.removeChild(textarea);
     }
     
-    // Add event listeners to chat messages
+    #// Add event listeners to chat messages
     document.addEventListener('DOMContentLoaded', function() {
         setTimeout(function() {
-            // Copy functionality for chat messages
+           # // Copy functionality for chat messages
             const chatMessages = document.querySelectorAll('.chat-message');
             chatMessages.forEach(function(message) {
                 message.addEventListener('touchstart', function() {
@@ -969,7 +969,7 @@ def add_javascript_functionality():
                 });
             });
             
-            // Collapsible About Us section
+            #// Collapsible About Us section
             const aboutUsHeader = document.querySelector('.about-us-header');
             const aboutUsContent = document.querySelector('.about-us-content');
             
