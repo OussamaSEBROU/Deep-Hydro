@@ -502,7 +502,7 @@ def setup_google_auth():
     
     <script>
     function handleCredentialResponse(response) {
-        // Post the ID token to Streamlit
+        #// Post the ID token to Streamlit
         const data = {{
             credential: response.credential
         }};
@@ -517,7 +517,7 @@ def setup_google_auth():
         .then(response => response.json())
         .then(data => {{
             if (data.success) {{
-                // Reload the page to update the UI
+               # // Reload the page to update the UI
                 window.location.reload();
             }}
         }});
