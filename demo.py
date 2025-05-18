@@ -764,13 +764,13 @@ def render_admin_analytics():
 def apply_custom_css():
     st.markdown("""
     <style>
-    /* Main app styling - adapts to dark/light mode */
+    #/* Main app styling - adapts to dark/light mode */
     .main .block-container {
         padding-top: 1rem;
         padding-bottom: 1rem;
     }
     
-    /* Header styling - adapts to dark/light mode */
+   # /* Header styling - adapts to dark/light mode */
     h1 {
         font-weight: 600;
         font-size: 1.8rem;
@@ -785,7 +785,7 @@ def apply_custom_css():
         font-weight: 500;
     }
     
-    /* Button styling - adapts to dark/light mode */
+   # /* Button styling - adapts to dark/light mode */
     .stButton > button {
         border-radius: 4px;
         font-weight: 500;
@@ -798,7 +798,7 @@ def apply_custom_css():
         box-shadow: 0 2px 5px rgba(0,0,0,0.2);
     }
     
-    /* Sidebar styling - smaller fonts */
+   # /* Sidebar styling - smaller fonts */
     .css-1d391kg, .css-12oz5g7 {
         padding: 1rem;
     }
@@ -815,7 +815,7 @@ def apply_custom_css():
         font-size: 1.2rem;
     }
     
-    /* Card-like containers */
+   # /* Card-like containers */
     .card-container {
         background-color: rgba(255, 255, 255, 0.05);
         border-radius: 8px;
@@ -824,7 +824,7 @@ def apply_custom_css():
         border: 1px solid rgba(128, 128, 128, 0.1);
     }
     
-    /* Chat message styling */
+   # /* Chat message styling */
     .chat-message {
         padding: 1rem;
         border-radius: 8px;
@@ -858,7 +858,7 @@ def apply_custom_css():
         display: none;
     }
     
-    /* Google Sign-In button */
+   # /* Google Sign-In button */
     .google-signin-button {
         display: flex;
         align-items: center;
@@ -895,7 +895,7 @@ def apply_custom_css():
         margin: 20px 0;
     }
     
-    /* Authentication required message */
+   # /* Authentication required message */
     .auth-required {
         background-color: rgba(255, 193, 7, 0.1);
         border-left: 3px solid #FFC107;
@@ -904,7 +904,7 @@ def apply_custom_css():
         margin: 1rem 0;
     }
     
-    /* About Us section - collapsible */
+   # /* About Us section - collapsible */
     .about-us-header {
         cursor: pointer;
         padding: 0.5rem;
@@ -920,7 +920,7 @@ def apply_custom_css():
         font-size: 0.9rem;
     }
     
-    /* App introduction */
+   # /* App introduction */
     .app-intro {
         padding: 1rem;
         border-radius: 8px;
