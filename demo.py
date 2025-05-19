@@ -523,7 +523,7 @@ def setup_google_auth():
         }});
     }
     </script>
-    """, unsafe_allow_html=True)
+    """  unsafe_allow_html=True)
 
 def verify_google_token(token):
     """
