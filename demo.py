@@ -928,7 +928,7 @@ def apply_custom_css():
         border-left: 4px solid #1E88E5;
     }
     </style>
-    """, unsafe_allow_html=True)
+    """  unsafe_allow_html=True)
 
 # --- JavaScript for Copy Functionality and Collapsible About Us ---
 def add_javascript_functionality():
