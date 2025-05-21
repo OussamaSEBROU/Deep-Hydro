@@ -39,9 +39,9 @@ def initialize_firebase():
                 cred_dict = json.loads(firebase_creds_json)
                 cred = credentials.Certificate(cred_dict)
                 firebase_url = os.getenv("FIREBASE_DATABASE_URL", 
-                                        f"https://{cred_dict.get("project_id")}-default-rtdb.firebaseio.com/")
+                                        f"https://{cred_dict.get('project_id')}-default-rtdb.firebaseio.com/")
                 firebase_admin.initialize_app(cred, {
-                    "databaseURL": firebase_url
+                    'databaseURL': firebase_url
                 })
                 print("Firebase Initialized Successfully") # Added print statement
                 return True
@@ -1160,5 +1160,3 @@ with tabs[5]:
     log_visitor_activity("Tab: Admin Analytics", "view_attempt")
     # Access control is handled *inside* render_admin_analytics
     render_admin_analytics()
-
-
