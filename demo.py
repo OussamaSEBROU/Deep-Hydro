@@ -1807,7 +1807,7 @@ def main():
                     st.session_state.chat_history.append({"role": "user", "content": user_message})
                     
                     # Add AI response to chat history (simplified for this version)
-                    ai_response = "I"m the DeepHydro AI assistant. I can help you with groundwater forecasting and analysis. What would you like to know?"
+                    ai_response = "I'm the DeepHydro AI assistant. I can help you with groundwater forecasting and analysis. What would you like to know?"
                     st.session_state.chat_history.append({"role": "assistant", "content": ai_response})
                     
                     # Rerun to update UI
