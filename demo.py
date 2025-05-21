@@ -594,9 +594,9 @@ def render_admin_analytics():
             
             today = datetime.datetime.now().date()
             today_visits = len(visitor_df[visitor_df["date"] == today])
-            st.metric("Today"s Visits", today_visits)
+            st.metric("Today's Visits", today_visits)
         else:
-            st.metric("Today"s Visits", 0)
+            st.metric("Today's Visits", 0)
     
     # Display usage statistics
     st.subheader("Usage Statistics")
