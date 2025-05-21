@@ -63,7 +63,7 @@ def initialize_firebase():
 
 # --- User Authentication and Usage Tracking ---
 def get_client_ip():
-    """Get the client"s IP address if available."""
+    """Get the client's IP address if available."""
     try:
         response = requests.get("https://api.ipify.org", timeout=3)
         return response.text if response.status_code == 200 else "Unknown"
@@ -526,7 +526,7 @@ def setup_google_auth():
 def handle_google_auth():
     """Handle Google authentication callback."""
     # This would be implemented as a separate endpoint in a production app
-    # For this example, we"ll simulate the authentication flow
+    # For this example, we'll simulate the authentication flow
     
     # Check if we have a token in the query parameters (simulated)
     # FIX: Use st.query_params instead of experimental_get_query_params
@@ -535,7 +535,7 @@ def handle_google_auth():
     
     if token:
         # In a real implementation, you would verify the token
-        # For this example, we"ll simulate successful authentication
+        # For this example, we'll simulate successful authentication
         st.session_state.user_authenticated = True
         st.session_state.user_email = "user@example.com" # Simulated email
         st.session_state.user_name = "Example User" # Simulated name
@@ -954,7 +954,7 @@ def set_page_config():
 def capture_user_agent():
     """Capture and store the user agent in session state."""
     try:
-        # This is a workaround as Streamlit doesn"t directly expose the user agent
+        # This is a workaround as Streamlit doesn't directly expose the user agent
         # In a production app, you might need a different approach
         # FIX: Ensure key is unique for components.html
         components.html(
@@ -982,7 +982,7 @@ def capture_user_agent():
              st.session_state.user_agent = "Unknown"
 
     except Exception as e:
-        # Fallback if the approach doesn"t work
+        # Fallback if the approach doesn't work
         print(f"Error capturing user agent: {e}")
         st.session_state.user_agent = "Unknown"
 
@@ -1016,9 +1016,9 @@ def load_and_clean_data(uploaded_file_content):
         if df.shape[1] < 2: st.error("File must have at least two columns (Date, Level)."); return None
         date_col = next((col for col in df.columns if any(kw in col.lower() for kw in ["date", "time"])), None)
         level_col = next((col for col in df.columns if any(kw in col.lower() for kw in ["level", "groundwater", "gwl"])), None)
-        if not date_col: st.error("Cannot find Date column (e.g., named "Date", "Time")."); return None
-        if not level_col: st.error("Cannot find Level column (e.g., named "Level", "Groundwater Level")."); return None
-        st.success(f"Identified columns: Date="{date_col}", Level="{level_col}". Renaming to "Date" and "Level".")
+        if not date_col: st.error("Cannot find Date column (e.g., named 'Date', 'Time')."); return None
+        if not level_col: st.error("Cannot find Level column (e.g., named 'Level', 'Groundwater Level')."); return None
+        st.success(f"Identified columns: Date='{date_col}', Level='{level_col}'. Renaming to 'Date' and 'Level'.")
         df = df.rename(columns={date_col: "Date", level_col: "Level"})[["Date", "Level"]]
         df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
         df["Level"] = pd.to_numeric(df["Level"], errors="coerce")
@@ -1045,11 +1045,11 @@ def create_sequences(data, sequence_length):
 
 @st.cache_resource # Cache model loading
 def load_keras_model_from_file(uploaded_file_obj, model_name_for_log):
-    temp_model_path = f"temp_{model_name_for_log.replace(" ", "_")}.h5"
+    temp_model_path = f"temp_{model_name_for_log.replace(' ', '_')}.h5"
     try:
         with open(temp_model_path, "wb") as f:
             f.write(uploaded_file_obj.getbuffer())
-        # Load model without compiling to avoid issues with custom/missing metrics like "mse" string
+        # Load model without compiling to avoid issues with custom/missing metrics like 'mse' string
         model = load_model(temp_model_path, compile=False)
         sequence_length = model.input_shape[1]
         st.success(f"Loaded {model_name_for_log}. Inferred sequence length: {sequence_length}")
@@ -1064,7 +1064,7 @@ def load_keras_model_from_file(uploaded_file_obj, model_name_for_log):
 @st.cache_resource
 def load_standard_model_cached(path):
     try:
-        # Load model without compiling to avoid issues with custom/missing metrics like "mse" string
+        # Load model without compiling to avoid issues with custom/missing metrics like 'mse' string
         model = load_model(path, compile=False)
         sequence_length = model.input_shape[1]
         return model, sequence_length
@@ -1206,15 +1206,15 @@ def generate_pdf_report(historical_df, forecast_df, model_metrics, forecast_plot
     
     # Report generation date
     pdf.set_font("Arial", "", 10)
-    pdf.cell(0, 10, f"Report Generated: {datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}", 0, 1)
+    pdf.cell(0, 10, f"Report Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", 0, 1)
     pdf.ln(5)
     
     # Data Summary
     pdf.set_font("Arial", "B", 12)
     pdf.cell(0, 10, "Data Summary", 0, 1)
     pdf.set_font("Arial", "", 10)
-    pdf.cell(0, 10, f"Historical Data Range: {historical_df["Date"].min().strftime("%Y-%m-%d")} to {historical_df["Date"].max().strftime("%Y-%m-%d")}", 0, 1)
-    pdf.cell(0, 10, f"Forecast Period: {forecast_df["Date"].min().strftime("%Y-%m-%d")} to {forecast_df["Date"].max().strftime("%Y-%m-%d")}", 0, 1)
+    pdf.cell(0, 10, f"Historical Data Range: {historical_df['Date'].min().strftime('%Y-%m-%d')} to {historical_df['Date'].max().strftime('%Y-%m-%d')}", 0, 1)
+    pdf.cell(0, 10, f"Forecast Period: {forecast_df['Date'].min().strftime('%Y-%m-%d')} to {forecast_df['Date'].max().strftime('%Y-%m-%d')}", 0, 1)
     pdf.cell(0, 10, f"Number of Historical Data Points: {len(historical_df)}", 0, 1)
     pdf.cell(0, 10, f"Number of Forecast Data Points: {len(forecast_df)}", 0, 1)
     pdf.ln(5)
@@ -1376,7 +1376,7 @@ def main():
             st.markdown("""
             <div class="auth-required">
                 <h3>Authentication Required</h3>
-                <p>You"ve reached the usage limit for this feature. Please sign in with your Google account to continue using the forecasting feature.</p>
+                <p>You've reached the usage limit for this feature. Please sign in with your Google account to continue using the forecasting feature.</p>
             </div>
             """, unsafe_allow_html=True)
             
@@ -1617,7 +1617,7 @@ def main():
             st.markdown("""
             <div class="auth-required">
                 <h3>Authentication Required</h3>
-                <p>You"ve reached the usage limit for this feature. Please sign in with your Google account to continue using the AI Report feature.</p>
+                <p>You've reached the usage limit for this feature. Please sign in with your Google account to continue using the AI Report feature.</p>
             </div>
             """, unsafe_allow_html=True)
             
@@ -1650,7 +1650,7 @@ def main():
                 
                 # Check for required columns
                 if "Date" not in historical_df.columns or not any(col for col in historical_df.columns if col in ["Level", "Value", "Groundwater"]):
-                    st.error("Historical data must contain "Date" column and a level column (named "Level", "Value", or "Groundwater").")
+                    st.error("Historical data must contain 'Date' column and a level column (named 'Level', 'Value', or 'Groundwater').")
                     st.stop()
                 
                 # Rename level column if needed
@@ -1676,7 +1676,7 @@ def main():
                 
                 # Check for required columns
                 if "Date" not in forecast_df.columns or not any(col for col in forecast_df.columns if col in ["Forecast", "Prediction", "Value"]):
-                    st.error("Forecast data must contain "Date" column and a forecast column (named "Forecast", "Prediction", or "Value").")
+                    st.error("Forecast data must contain 'Date' column and a forecast column (named 'Forecast', 'Prediction', or 'Value').")
                     st.stop()
                 
                 # Rename forecast column if needed
@@ -1759,7 +1759,7 @@ def main():
             st.markdown("""
             <div class="auth-required">
                 <h3>Authentication Required</h3>
-                <p>You"ve reached the usage limit for this feature. Please sign in with your Google account to continue using the AI Chat feature.</p>
+                <p>You've reached the usage limit for this feature. Please sign in with your Google account to continue using the AI Chat feature.</p>
             </div>
             """, unsafe_allow_html=True)
             
