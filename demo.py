@@ -46,7 +46,7 @@ def initialize_firebase():
                 
                 # Get Firebase database URL from environment or use default format
                 firebase_url = os.getenv("FIREBASE_DATABASE_URL", 
-                                        f"https://{cred_dict.get("project_id")}-default-rtdb.firebaseio.com/")
+                                        f"https://{cred_dict.get('project_id')}-default-rtdb.firebaseio.com/")
                 
                 # Initialize Firebase app
                 firebase_admin.initialize_app(cred, {
