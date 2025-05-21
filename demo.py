@@ -37,7 +37,7 @@ def initialize_firebase():
     if not firebase_admin._apps:
         try:
             # Get Firebase credentials from environment variable
-            firebase_creds_json = os.getenv('FIREBASE_SERVICE_ACCOUNT')
+            firebase_creds_json = os.getenv("FIREBASE_SERVICE_ACCOUNT")
             
             if firebase_creds_json:
                 # Parse the JSON string from environment variable
@@ -45,12 +45,12 @@ def initialize_firebase():
                 cred = credentials.Certificate(cred_dict)
                 
                 # Get Firebase database URL from environment or use default format
-                firebase_url = os.getenv('FIREBASE_DATABASE_URL', 
-                                        f"https://{cred_dict.get('project_id')}-default-rtdb.firebaseio.com/")
+                firebase_url = os.getenv("FIREBASE_DATABASE_URL", 
+                                        f"https://{cred_dict.get("project_id")}-default-rtdb.firebaseio.com/")
                 
                 # Initialize Firebase app
                 firebase_admin.initialize_app(cred, {
-                    'databaseURL': firebase_url
+                    "databaseURL": firebase_url
                 })
                 return True
             else:
@@ -63,22 +63,22 @@ def initialize_firebase():
 
 # --- User Authentication and Usage Tracking ---
 def get_client_ip():
-    """Get the client's IP address if available."""
+    """Get the client"s IP address if available."""
     try:
-        response = requests.get('https://api.ipify.org', timeout=3)
+        response = requests.get("https://api.ipify.org", timeout=3)
         return response.text if response.status_code == 200 else "Unknown"
     except:
         return "Unknown"
 
 def get_session_id():
     """Create or retrieve a unique session ID for the current user session."""
-    if 'session_id' not in st.session_state:
+    if "session_id" not in st.session_state:
         st.session_state.session_id = str(uuid.uuid4())
     return st.session_state.session_id
 
 def get_user_identifier():
     """Get a unique identifier for the current user based on email (if authenticated) or IP."""
-    if 'user_email' in st.session_state and st.session_state.user_email:
+    if "user_email" in st.session_state and st.session_state.user_email:
         return st.session_state.user_email
     else:
         # Use IP address as fallback identifier
@@ -104,10 +104,10 @@ def track_usage(feature_name):
         ip_address = get_client_ip()
         
         # Create a reference to the usage counts collection
-        ref = db.reference('usage_counts')
+        ref = db.reference("usage_counts")
         
         # Create a sanitized user ID for Firebase path (remove special characters)
-        sanitized_user_id = ''.join(c if c.isalnum() else '_' for c in user_id)
+        sanitized_user_id = "".join(c if c.isalnum() else "_" for c in user_id)
         
         # Get current usage count for this user and feature
         user_ref = ref.child(sanitized_user_id)
@@ -119,13 +119,13 @@ def track_usage(feature_name):
         # Update user data
         user_data.update({
             feature_name: feature_count,
-            'last_used': datetime.datetime.now().isoformat(),
-            'ip_address': ip_address
+            "last_used": datetime.datetime.now().isoformat(),
+            "ip_address": ip_address
         })
         
         # If user is authenticated, store email
-        if 'user_email' in st.session_state and st.session_state.user_email:
-            user_data['email'] = st.session_state.user_email
+        if "user_email" in st.session_state and st.session_state.user_email:
+            user_data["email"] = st.session_state.user_email
         
         # Save updated data
         user_ref.set(user_data)
@@ -148,7 +148,7 @@ def check_feature_access(feature_name):
         bool: True if user has access, False if access is restricted
     """
     # If user is authenticated, always grant access
-    if 'user_authenticated' in st.session_state and st.session_state.user_authenticated:
+    if "user_authenticated" in st.session_state and st.session_state.user_authenticated:
         return True
     
     # Get usage count for this feature
@@ -172,10 +172,10 @@ def get_feature_usage_count(feature_name):
         user_id = get_user_identifier()
         
         # Create a sanitized user ID for Firebase path
-        sanitized_user_id = ''.join(c if c.isalnum() else '_' for c in user_id)
+        sanitized_user_id = "".join(c if c.isalnum() else "_" for c in user_id)
         
         # Get usage count from Firebase
-        ref = db.reference(f'usage_counts/{sanitized_user_id}/{feature_name}')
+        ref = db.reference(f"usage_counts/{sanitized_user_id}/{feature_name}")
         count = ref.get() or 0
         
         return count
@@ -198,7 +198,7 @@ def log_visitor_activity(page_name, action="page_view"):
     
     try:
         # Create a reference to the visitors collection
-        ref = db.reference('visitors')
+        ref = db.reference("visitors")
         
         # Generate a unique ID for this visit
         visit_id = str(uuid.uuid4())
@@ -207,21 +207,21 @@ def log_visitor_activity(page_name, action="page_view"):
         timestamp = datetime.datetime.now().isoformat()
         ip_address = get_client_ip()
         session_id = get_session_id()
-        user_agent = st.session_state.get('user_agent', 'Unknown')
+        user_agent = st.session_state.get("user_agent", "Unknown")
         
         # Create the visitor data entry
         visitor_data = {
-            'timestamp': timestamp,
-            'ip_address': ip_address,
-            'page': page_name,
-            'action': action,
-            'session_id': session_id,
-            'user_agent': user_agent
+            "timestamp": timestamp,
+            "ip_address": ip_address,
+            "page": page_name,
+            "action": action,
+            "session_id": session_id,
+            "user_agent": user_agent
         }
         
         # Add user email if authenticated
-        if 'user_email' in st.session_state and st.session_state.user_email:
-            visitor_data['email'] = st.session_state.user_email
+        if "user_email" in st.session_state and st.session_state.user_email:
+            visitor_data["email"] = st.session_state.user_email
         
         # Push the data to Firebase
         ref.child(visit_id).set(visitor_data)
@@ -240,7 +240,7 @@ def fetch_visitor_logs():
     
     try:
         # Get reference to visitors collection
-        ref = db.reference('visitors')
+        ref = db.reference("visitors")
         
         # Get all visitor data
         visitors_data = ref.get()
@@ -251,16 +251,16 @@ def fetch_visitor_logs():
         # Convert to DataFrame
         visitors_list = []
         for visit_id, data in visitors_data.items():
-            data['visit_id'] = visit_id
+            data["visit_id"] = visit_id
             visitors_list.append(data)
         
         df = pd.DataFrame(visitors_list)
         
         # Convert timestamp to datetime
-        df['timestamp'] = pd.to_datetime(df['timestamp'])
+        df["timestamp"] = pd.to_datetime(df["timestamp"])
         
         # Sort by timestamp (most recent first)
-        df = df.sort_values('timestamp', ascending=False)
+        df = df.sort_values("timestamp", ascending=False)
         
         return df
     except Exception as e:
@@ -277,7 +277,7 @@ def fetch_usage_counts():
     
     try:
         # Get reference to usage counts collection
-        ref = db.reference('usage_counts')
+        ref = db.reference("usage_counts")
         
         # Get all usage data
         usage_data = ref.get()
@@ -290,24 +290,24 @@ def fetch_usage_counts():
         for user_id, data in usage_data.items():
             # Extract feature usage counts
             for feature, count in data.items():
-                if feature not in ['last_used', 'ip_address', 'email']:
+                if feature not in ["last_used", "ip_address", "email"]:
                     usage_list.append({
-                        'user_id': user_id,
-                        'email': data.get('email', 'Not authenticated'),
-                        'ip_address': data.get('ip_address', 'Unknown'),
-                        'feature': feature,
-                        'count': count,
-                        'last_used': data.get('last_used', '')
+                        "user_id": user_id,
+                        "email": data.get("email", "Not authenticated"),
+                        "ip_address": data.get("ip_address", "Unknown"),
+                        "feature": feature,
+                        "count": count,
+                        "last_used": data.get("last_used", "")
                     })
         
         df = pd.DataFrame(usage_list)
         
         # Convert timestamp to datetime if present
-        if 'last_used' in df.columns and not df.empty:
-            df['last_used'] = pd.to_datetime(df['last_used'])
+        if "last_used" in df.columns and not df.empty:
+            df["last_used"] = pd.to_datetime(df["last_used"])
         
         # Sort by count (highest first)
-        df = df.sort_values('count', ascending=False)
+        df = df.sort_values("count", ascending=False)
         
         return df
     except Exception as e:
@@ -334,49 +334,49 @@ def create_visitor_charts(visitor_df):
         df = visitor_df.copy()
         
         # Add date column for daily aggregation
-        df['date'] = df['timestamp'].dt.date
+        df["date"] = df["timestamp"].dt.date
         
         # 1. Daily visitors chart
-        daily_visitors = df.groupby('date').size().reset_index(name='count')
-        daily_visitors['date'] = pd.to_datetime(daily_visitors['date'])
+        daily_visitors = df.groupby("date").size().reset_index(name="count")
+        daily_visitors["date"] = pd.to_datetime(daily_visitors["date"])
         
-        fig1 = px.line(daily_visitors, x='date', y='count', 
-                      title='Daily Visitors',
-                      labels={'count': 'Number of Visitors', 'date': 'Date'})
-        fig1.update_layout(xaxis_title='Date', yaxis_title='Number of Visitors')
+        fig1 = px.line(daily_visitors, x="date", y="count", 
+                      title="Daily Visitors",
+                      labels={"count": "Number of Visitors", "date": "Date"})
+        fig1.update_layout(xaxis_title="Date", yaxis_title="Number of Visitors")
         figures.append(fig1)
         
         # 2. Page popularity chart
-        page_counts = df['page'].value_counts().reset_index()
-        page_counts.columns = ['page', 'count']
+        page_counts = df["page"].value_counts().reset_index()
+        page_counts.columns = ["page", "count"]
         
-        fig2 = px.bar(page_counts, x='page', y='count',
-                     title='Page Popularity',
-                     labels={'count': 'Number of Views', 'page': 'Page'})
-        fig2.update_layout(xaxis_title='Page', yaxis_title='Number of Views')
+        fig2 = px.bar(page_counts, x="page", y="count",
+                     title="Page Popularity",
+                     labels={"count": "Number of Views", "page": "Page"})
+        fig2.update_layout(xaxis_title="Page", yaxis_title="Number of Views")
         figures.append(fig2)
         
         # 3. User actions chart
-        action_counts = df['action'].value_counts().reset_index()
-        action_counts.columns = ['action', 'count']
+        action_counts = df["action"].value_counts().reset_index()
+        action_counts.columns = ["action", "count"]
         
-        fig3 = px.pie(action_counts, values='count', names='action',
-                     title='User Actions')
+        fig3 = px.pie(action_counts, values="count", names="action",
+                     title="User Actions")
         figures.append(fig3)
         
         # 4. Hourly activity heatmap - FIXED to handle any data shape
         try:
-            df['hour'] = df['timestamp'].dt.hour
-            df['day_of_week'] = df['timestamp'].dt.day_name()
+            df["hour"] = df["timestamp"].dt.hour
+            df["day_of_week"] = df["timestamp"].dt.day_name()
             
             # Order days of week properly
-            day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+            day_order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
             
-            hourly_activity = df.groupby(['day_of_week', 'hour']).size().reset_index(name='count')
+            hourly_activity = df.groupby(["day_of_week", "hour"]).size().reset_index(name="count")
             
             # Check if we have data for all hours and days
             if len(hourly_activity) > 0:
-                hourly_pivot = hourly_activity.pivot_table(values='count', index='day_of_week', columns='hour', fill_value=0)
+                hourly_pivot = hourly_activity.pivot_table(values="count", index="day_of_week", columns="hour", fill_value=0)
                 
                 # Reindex to ensure proper day order for available days
                 available_days = set(hourly_pivot.index) & set(day_order)
@@ -448,32 +448,32 @@ def create_usage_charts(usage_df):
     
     try:
         # 1. Feature popularity chart
-        feature_counts = usage_df.groupby('feature')['count'].sum().reset_index()
-        feature_counts = feature_counts.sort_values('count', ascending=False)
+        feature_counts = usage_df.groupby("feature")["count"].sum().reset_index()
+        feature_counts = feature_counts.sort_values("count", ascending=False)
         
-        fig1 = px.bar(feature_counts, x='feature', y='count',
-                     title='Feature Usage',
-                     labels={'count': 'Number of Uses', 'feature': 'Feature'})
-        fig1.update_layout(xaxis_title='Feature', yaxis_title='Number of Uses')
+        fig1 = px.bar(feature_counts, x="feature", y="count",
+                     title="Feature Usage",
+                     labels={"count": "Number of Uses", "feature": "Feature"})
+        fig1.update_layout(xaxis_title="Feature", yaxis_title="Number of Uses")
         figures.append(fig1)
         
         # 2. User activity chart - Top 10 users
-        user_counts = usage_df.groupby('user_id')['count'].sum().reset_index()
-        user_counts = user_counts.sort_values('count', ascending=False).head(10)
+        user_counts = usage_df.groupby("user_id")["count"].sum().reset_index()
+        user_counts = user_counts.sort_values("count", ascending=False).head(10)
         
-        fig2 = px.bar(user_counts, x='user_id', y='count',
-                     title='Top 10 Users by Activity',
-                     labels={'count': 'Number of Uses', 'user_id': 'User ID'})
-        fig2.update_layout(xaxis_title='User ID', yaxis_title='Number of Uses')
+        fig2 = px.bar(user_counts, x="user_id", y="count",
+                     title="Top 10 Users by Activity",
+                     labels={"count": "Number of Uses", "user_id": "User ID"})
+        fig2.update_layout(xaxis_title="User ID", yaxis_title="Number of Uses")
         figures.append(fig2)
         
         # 3. Authentication status pie chart
-        auth_status = usage_df['email'].apply(lambda x: 'Authenticated' if x != 'Not authenticated' else 'Not Authenticated')
+        auth_status = usage_df["email"].apply(lambda x: "Authenticated" if x != "Not authenticated" else "Not Authenticated")
         auth_counts = auth_status.value_counts().reset_index()
-        auth_counts.columns = ['status', 'count']
+        auth_counts.columns = ["status", "count"]
         
-        fig3 = px.pie(auth_counts, values='count', names='status',
-                     title='User Authentication Status')
+        fig3 = px.pie(auth_counts, values="count", names="status",
+                     title="User Authentication Status")
         figures.append(fig3)
         
     except Exception as e:
@@ -487,9 +487,10 @@ def create_usage_charts(usage_df):
 def setup_google_auth():
     """Set up Google authentication components."""
     # Get Google client ID from environment
-    client_id = os.getenv('GOOGLE_CLIENT_ID', 'YOUR_GOOGLE_CLIENT_ID')
+    client_id = os.getenv("GOOGLE_CLIENT_ID", "YOUR_GOOGLE_CLIENT_ID")
     
     # Add Google Sign-In button
+    # FIX: Removed // comments from JavaScript within f-string
     st.markdown(f"""
     <div id="g_id_onload"
          data-client_id="{client_id}"
@@ -498,53 +499,54 @@ def setup_google_auth():
     <div class="g_id_signin" data-type="standard"></div>
     
     <script>
-    function handleCredentialResponse(response) {
-        // Post the ID token to Streamlit
-        const data = {{
+    function handleCredentialResponse(response) {{
+        /* Post the ID token to Streamlit */
+        const data = {{ 
             credential: response.credential
         }};
         
-        fetch('/google_auth', {{
-            method: 'POST',
+        fetch("/google_auth", {{
+            method: "POST",
             headers: {{
-                'Content-Type': 'application/json',
+                "Content-Type": "application/json",
             }},
             body: JSON.stringify(data)
         }})
         .then(response => response.json())
         .then(data => {{
             if (data.success) {{
-                // Reload the page to update the UI
+                /* Reload the page to update the UI */
                 window.location.reload();
             }}
         }});
-    }
+    }}
     </script>
     """, unsafe_allow_html=True)
 
 def handle_google_auth():
     """Handle Google authentication callback."""
     # This would be implemented as a separate endpoint in a production app
-    # For this example, we'll simulate the authentication flow
+    # For this example, we"ll simulate the authentication flow
     
     # Check if we have a token in the query parameters (simulated)
-    params = st.experimental_get_query_params() if hasattr(st, 'experimental_get_query_params') else {}
-    token = params.get('token', [None])[0]
+    # FIX: Use st.query_params instead of experimental_get_query_params
+    params = st.query_params
+    token = params.get("token")
     
     if token:
         # In a real implementation, you would verify the token
-        # For this example, we'll simulate successful authentication
+        # For this example, we"ll simulate successful authentication
         st.session_state.user_authenticated = True
-        st.session_state.user_email = "user@example.com"
-        st.session_state.user_name = "Example User"
+        st.session_state.user_email = "user@example.com" # Simulated email
+        st.session_state.user_name = "Example User" # Simulated name
         
         # Check if user is an admin
-        admin_emails = os.getenv('ADMIN_EMAILS', '').split(',')
+        admin_emails = os.getenv("ADMIN_EMAILS", "").split(",")
         st.session_state.is_admin = st.session_state.user_email in admin_emails
         
         # Redirect to remove token from URL
-        if hasattr(st, 'experimental_set_query_params'):
-            st.experimental_set_query_params()
+        # FIX: Use st.query_params.clear() instead of experimental_set_query_params
+        st.query_params.clear()
         
         return True
     
@@ -556,24 +558,16 @@ def render_admin_analytics():
     st.header("Admin Analytics Dashboard")
     
     # Check if user is authenticated and is an admin
-    if not st.session_state.get('user_authenticated', False):
+    if not st.session_state.get("user_authenticated", False):
         st.info("Please sign in with your Google account to view analytics.")
         
         # Add Google Sign-In button
-        st.markdown("""
-        <div class="login-container">
-            <p>Sign in with your Google account to access the admin dashboard.</p>
-            <button class="google-signin-button">
-                <img src="https://developers.google.com/identity/images/g-logo.png" alt="Google logo">
-                <span>Sign in with Google</span>
-            </button>
-        </div>
-        """, unsafe_allow_html=True)
+        setup_google_auth() # Display the sign-in button
         
         return
     
     # Check if user is an admin
-    if not st.session_state.get('is_admin', False):
+    if not st.session_state.get("is_admin", False):
         st.error("You do not have permission to access the admin dashboard.")
         return
     
@@ -590,34 +584,34 @@ def render_admin_analytics():
         st.metric("Total Visits", total_visits)
     
     with col2:
-        unique_visitors = visitor_df['session_id'].nunique() if not visitor_df.empty else 0
+        unique_visitors = visitor_df["session_id"].nunique() if not visitor_df.empty else 0
         st.metric("Unique Visitors", unique_visitors)
     
     with col3:
         if not visitor_df.empty:
-            if 'date' not in visitor_df.columns:
-                visitor_df['date'] = visitor_df['timestamp'].dt.date
+            if "date" not in visitor_df.columns:
+                visitor_df["date"] = visitor_df["timestamp"].dt.date
             
             today = datetime.datetime.now().date()
-            today_visits = len(visitor_df[visitor_df['date'] == today])
-            st.metric("Today's Visits", today_visits)
+            today_visits = len(visitor_df[visitor_df["date"] == today])
+            st.metric("Today"s Visits", today_visits)
         else:
-            st.metric("Today's Visits", 0)
+            st.metric("Today"s Visits", 0)
     
     # Display usage statistics
     st.subheader("Usage Statistics")
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        total_usage = usage_df['count'].sum() if not usage_df.empty else 0
+        total_usage = usage_df["count"].sum() if not usage_df.empty else 0
         st.metric("Total Feature Uses", total_usage)
     
     with col2:
-        unique_users = usage_df['user_id'].nunique() if not usage_df.empty else 0
+        unique_users = usage_df["user_id"].nunique() if not usage_df.empty else 0
         st.metric("Unique Users", unique_users)
     
     with col3:
-        authenticated_users = usage_df[usage_df['email'] != 'Not authenticated']['user_id'].nunique() if not usage_df.empty else 0
+        authenticated_users = usage_df[usage_df["email"] != "Not authenticated"]["user_id"].nunique() if not usage_df.empty else 0
         st.metric("Authenticated Users", authenticated_users)
     
     # Create and display visualizations
@@ -652,7 +646,7 @@ def render_admin_analytics():
             if not visitor_df.empty:
                 date_range = st.date_input(
                     "Date Range",
-                    [visitor_df['timestamp'].min().date(), visitor_df['timestamp'].max().date()]
+                    [visitor_df["timestamp"].min().date(), visitor_df["timestamp"].max().date()]
                 )
             else:
                 date_range = st.date_input("Date Range", [datetime.datetime.now().date(), datetime.datetime.now().date()])
@@ -665,7 +659,7 @@ def render_admin_analytics():
             if not visitor_df.empty:
                 page_filter = st.multiselect(
                     "Filter by Page",
-                    options=visitor_df['page'].unique(),
+                    options=visitor_df["page"].unique(),
                     default=[]
                 )
             else:
@@ -682,28 +676,28 @@ def render_admin_analytics():
             if date_range and len(date_range) == 2:
                 start_date, end_date = date_range
                 filtered_df = filtered_df[
-                    (filtered_df['timestamp'].dt.date >= start_date) & 
-                    (filtered_df['timestamp'].dt.date <= end_date)
+                    (filtered_df["timestamp"].dt.date >= start_date) & 
+                    (filtered_df["timestamp"].dt.date <= end_date)
                 ]
             
             if page_filter:
-                filtered_df = filtered_df[filtered_df['page'].isin(page_filter)]
+                filtered_df = filtered_df[filtered_df["page"].isin(page_filter)]
             
             # Display the filtered data
-            st.dataframe(filtered_df[['timestamp', 'ip_address', 'email', 'page', 'action', 'session_id']])
+            st.dataframe(filtered_df[["timestamp", "ip_address", "email", "page", "action", "session_id"]])
             
             # Export options
             if st.button("Export to CSV"):
                 csv = filtered_df.to_csv(index=False)
                 b64 = base64.b64encode(csv.encode()).decode()
-                href = f'<a href="data:file/csv;base64,{b64}" download="visitor_logs.csv">Download CSV File</a>'
+                href = f"<a href=\"data:file/csv;base64,{b64}\" download=\"visitor_logs.csv\">Download CSV File</a>"
                 st.markdown(href, unsafe_allow_html=True)
         else:
             st.info("No visitor data available.")
     except Exception as filter_err:
         st.error(f"Error applying filters: {filter_err}")
         if not visitor_df.empty:
-            st.dataframe(visitor_df[['timestamp', 'ip_address', 'page', 'action', 'session_id']])
+            st.dataframe(visitor_df[["timestamp", "ip_address", "page", "action", "session_id"]])
     
     # Display usage data
     st.subheader("Feature Usage Data")
@@ -715,7 +709,7 @@ def render_admin_analytics():
         if st.button("Export Usage Data to CSV"):
             csv = usage_df.to_csv(index=False)
             b64 = base64.b64encode(csv.encode()).decode()
-            href = f'<a href="data:file/csv;base64,{b64}" download="usage_data.csv">Download CSV File</a>'
+            href = f"<a href=\"data:file/csv;base64,{b64}\" download=\"usage_data.csv\">Download CSV File</a>"
             st.markdown(href, unsafe_allow_html=True)
     else:
         st.info("No usage data available.")
@@ -827,7 +821,7 @@ def apply_custom_css():
         border: 1px solid #ddd;
         border-radius: 4px;
         padding: 8px 16px;
-        font-family: 'Roboto', sans-serif;
+        font-family: "Roboto", sans-serif;
         font-weight: 500;
         cursor: pointer;
         box-shadow: 0 1px 3px rgba(0,0,0,0.1);
@@ -892,55 +886,56 @@ def apply_custom_css():
 
 # --- JavaScript for Copy Functionality and Collapsible About Us ---
 def add_javascript_functionality():
+    # FIX: Removed // comments from JavaScript
     st.markdown("""
     <script>
-    // Function to copy text to clipboard
+    /* Function to copy text to clipboard */
     function copyToClipboard(text) {
-        const textarea = document.createElement('textarea');
+        const textarea = document.createElement("textarea");
         textarea.value = text;
         document.body.appendChild(textarea);
         textarea.select();
-        document.execCommand('copy');
+        document.execCommand("copy");
         document.body.removeChild(textarea);
     }
     
-    // Add event listeners to chat messages
-    document.addEventListener('DOMContentLoaded', function() {
+    /* Add event listeners to chat messages */
+    document.addEventListener("DOMContentLoaded", function() {
         setTimeout(function() {
-            // Copy functionality for chat messages
-            const chatMessages = document.querySelectorAll('.chat-message');
+            /* Copy functionality for chat messages */
+            const chatMessages = document.querySelectorAll(".chat-message");
             chatMessages.forEach(function(message) {
-                message.addEventListener('touchstart', function() {
+                message.addEventListener("touchstart", function() {
                     this.longPressTimer = setTimeout(() => {
                         const text = this.innerText;
                         copyToClipboard(text);
-                        const tooltip = this.querySelector('.copy-tooltip');
+                        const tooltip = this.querySelector(".copy-tooltip");
                         if (tooltip) {
-                            tooltip.style.display = 'block';
+                            tooltip.style.display = "block";
                             setTimeout(() => {
-                                tooltip.style.display = 'none';
+                                tooltip.style.display = "none";
                             }, 1000);
                         }
                     }, 500);
                 });
                 
-                message.addEventListener('touchend', function() {
+                message.addEventListener("touchend", function() {
                     clearTimeout(this.longPressTimer);
                 });
             });
             
-            // Collapsible About Us section
-            const aboutUsHeader = document.querySelector('.about-us-header');
-            const aboutUsContent = document.querySelector('.about-us-content');
+            /* Collapsible About Us section */
+            const aboutUsHeader = document.querySelector(".about-us-header");
+            const aboutUsContent = document.querySelector(".about-us-content");
             
             if (aboutUsHeader && aboutUsContent) {
-                aboutUsContent.style.display = 'none';
+                aboutUsContent.style.display = "none";
                 
-                aboutUsHeader.addEventListener('click', function() {
-                    if (aboutUsContent.style.display === 'none') {
-                        aboutUsContent.style.display = 'block';
+                aboutUsHeader.addEventListener("click", function() {
+                    if (aboutUsContent.style.display === "none") {
+                        aboutUsContent.style.display = "block";
                     } else {
-                        aboutUsContent.style.display = 'none';
+                        aboutUsContent.style.display = "none";
                     }
                 });
             }
@@ -959,8 +954,9 @@ def set_page_config():
 def capture_user_agent():
     """Capture and store the user agent in session state."""
     try:
-        # This is a workaround as Streamlit doesn't directly expose the user agent
+        # This is a workaround as Streamlit doesn"t directly expose the user agent
         # In a production app, you might need a different approach
+        # FIX: Ensure key is unique for components.html
         components.html(
             """
             <script>
@@ -968,38 +964,44 @@ def capture_user_agent():
                     const userAgent = navigator.userAgent;
                     window.parent.postMessage({
                         type: "streamlit:setComponentValue",
+                        key: "user_agent_capture_component", /* Use key here */
                         value: userAgent
                     }, "*");
                 }
             </script>
             """,
             height=0,
-            key="user_agent_capture"
+            key="user_agent_capture_component" # Use the same key here
         )
         
         # Store the user agent in session state
-        if "user_agent_capture" in st.session_state:
-            st.session_state.user_agent = st.session_state.user_agent_capture
-    except:
-        # Fallback if the approach doesn't work
+        # FIX: Access component value using the correct key
+        if "user_agent_capture_component" in st.session_state:
+            st.session_state.user_agent = st.session_state.user_agent_capture_component
+        else:
+             st.session_state.user_agent = "Unknown"
+
+    except Exception as e:
+        # Fallback if the approach doesn"t work
+        print(f"Error capturing user agent: {e}")
         st.session_state.user_agent = "Unknown"
 
 # --- Initialize Session State ---
 def initialize_session_state():
     """Initialize session state variables."""
-    if 'user_authenticated' not in st.session_state:
+    if "user_authenticated" not in st.session_state:
         st.session_state.user_authenticated = False
     
-    if 'user_email' not in st.session_state:
+    if "user_email" not in st.session_state:
         st.session_state.user_email = None
     
-    if 'user_name' not in st.session_state:
+    if "user_name" not in st.session_state:
         st.session_state.user_name = None
     
-    if 'is_admin' not in st.session_state:
+    if "is_admin" not in st.session_state:
         st.session_state.is_admin = False
     
-    if 'chat_history' not in st.session_state:
+    if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
 
 # --- Model Paths & Constants ---
@@ -1014,9 +1016,9 @@ def load_and_clean_data(uploaded_file_content):
         if df.shape[1] < 2: st.error("File must have at least two columns (Date, Level)."); return None
         date_col = next((col for col in df.columns if any(kw in col.lower() for kw in ["date", "time"])), None)
         level_col = next((col for col in df.columns if any(kw in col.lower() for kw in ["level", "groundwater", "gwl"])), None)
-        if not date_col: st.error("Cannot find Date column (e.g., named 'Date', 'Time')."); return None
-        if not level_col: st.error("Cannot find Level column (e.g., named 'Level', 'Groundwater Level')."); return None
-        st.success(f"Identified columns: Date='{date_col}', Level='{level_col}'. Renaming to 'Date' and 'Level'.")
+        if not date_col: st.error("Cannot find Date column (e.g., named "Date", "Time")."); return None
+        if not level_col: st.error("Cannot find Level column (e.g., named "Level", "Groundwater Level")."); return None
+        st.success(f"Identified columns: Date="{date_col}", Level="{level_col}". Renaming to "Date" and "Level".")
         df = df.rename(columns={date_col: "Date", level_col: "Level"})[["Date", "Level"]]
         df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
         df["Level"] = pd.to_numeric(df["Level"], errors="coerce")
@@ -1043,11 +1045,11 @@ def create_sequences(data, sequence_length):
 
 @st.cache_resource # Cache model loading
 def load_keras_model_from_file(uploaded_file_obj, model_name_for_log):
-    temp_model_path = f"temp_{model_name_for_log.replace(' ', '_')}.h5"
+    temp_model_path = f"temp_{model_name_for_log.replace(" ", "_")}.h5"
     try:
         with open(temp_model_path, "wb") as f:
             f.write(uploaded_file_obj.getbuffer())
-        # Load model without compiling to avoid issues with custom/missing metrics like 'mse' string
+        # Load model without compiling to avoid issues with custom/missing metrics like "mse" string
         model = load_model(temp_model_path, compile=False)
         sequence_length = model.input_shape[1]
         st.success(f"Loaded {model_name_for_log}. Inferred sequence length: {sequence_length}")
@@ -1062,7 +1064,7 @@ def load_keras_model_from_file(uploaded_file_obj, model_name_for_log):
 @st.cache_resource
 def load_standard_model_cached(path):
     try:
-        # Load model without compiling to avoid issues with custom/missing metrics like 'mse' string
+        # Load model without compiling to avoid issues with custom/missing metrics like "mse" string
         model = load_model(path, compile=False)
         sequence_length = model.input_shape[1]
         return model, sequence_length
@@ -1190,79 +1192,79 @@ def create_model_evaluation_plot(y_true, y_pred, title="Model Evaluation"):
 def generate_pdf_report(historical_df, forecast_df, model_metrics, forecast_plot_path, model_eval_plot_path=None, loss_plot_path=None, ai_analysis=None):
     class PDF(FPDF):
         def header(self):
-            self.set_font('Arial', 'B', 15)
-            self.cell(0, 10, 'Groundwater Level Forecast Report', 0, 1, 'C')
+            self.set_font("Arial", "B", 15)
+            self.cell(0, 10, "Groundwater Level Forecast Report", 0, 1, "C")
             self.ln(5)
         
         def footer(self):
             self.set_y(-15)
-            self.set_font('Arial', 'I', 8)
-            self.cell(0, 10, f'Page {self.page_no()}', 0, 0, 'C')
+            self.set_font("Arial", "I", 8)
+            self.cell(0, 10, f"Page {self.page_no()}", 0, 0, "C")
     
     pdf = PDF()
     pdf.add_page()
     
     # Report generation date
-    pdf.set_font('Arial', '', 10)
-    pdf.cell(0, 10, f'Report Generated: {datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}', 0, 1)
+    pdf.set_font("Arial", "", 10)
+    pdf.cell(0, 10, f"Report Generated: {datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}", 0, 1)
     pdf.ln(5)
     
     # Data Summary
-    pdf.set_font('Arial', 'B', 12)
-    pdf.cell(0, 10, 'Data Summary', 0, 1)
-    pdf.set_font('Arial', '', 10)
-    pdf.cell(0, 10, f'Historical Data Range: {historical_df["Date"].min().strftime("%Y-%m-%d")} to {historical_df["Date"].max().strftime("%Y-%m-%d")}', 0, 1)
-    pdf.cell(0, 10, f'Forecast Period: {forecast_df["Date"].min().strftime("%Y-%m-%d")} to {forecast_df["Date"].max().strftime("%Y-%m-%d")}', 0, 1)
-    pdf.cell(0, 10, f'Number of Historical Data Points: {len(historical_df)}', 0, 1)
-    pdf.cell(0, 10, f'Number of Forecast Data Points: {len(forecast_df)}', 0, 1)
+    pdf.set_font("Arial", "B", 12)
+    pdf.cell(0, 10, "Data Summary", 0, 1)
+    pdf.set_font("Arial", "", 10)
+    pdf.cell(0, 10, f"Historical Data Range: {historical_df["Date"].min().strftime("%Y-%m-%d")} to {historical_df["Date"].max().strftime("%Y-%m-%d")}", 0, 1)
+    pdf.cell(0, 10, f"Forecast Period: {forecast_df["Date"].min().strftime("%Y-%m-%d")} to {forecast_df["Date"].max().strftime("%Y-%m-%d")}", 0, 1)
+    pdf.cell(0, 10, f"Number of Historical Data Points: {len(historical_df)}", 0, 1)
+    pdf.cell(0, 10, f"Number of Forecast Data Points: {len(forecast_df)}", 0, 1)
     pdf.ln(5)
     
     # Model Metrics
-    pdf.set_font('Arial', 'B', 12)
-    pdf.cell(0, 10, 'Model Performance Metrics', 0, 1)
-    pdf.set_font('Arial', '', 10)
+    pdf.set_font("Arial", "B", 12)
+    pdf.cell(0, 10, "Model Performance Metrics", 0, 1)
+    pdf.set_font("Arial", "", 10)
     for metric, value in model_metrics.items():
         if not np.isnan(value) and not np.isinf(value):
-            pdf.cell(0, 10, f'{metric}: {value:.4f}', 0, 1)
+            pdf.cell(0, 10, f"{metric}: {value:.4f}", 0, 1)
         else:
-            pdf.cell(0, 10, f'{metric}: N/A', 0, 1)
+            pdf.cell(0, 10, f"{metric}: N/A", 0, 1)
     pdf.ln(5)
     
     # Forecast Plot
-    pdf.set_font('Arial', 'B', 12)
-    pdf.cell(0, 10, 'Forecast Visualization', 0, 1)
+    pdf.set_font("Arial", "B", 12)
+    pdf.cell(0, 10, "Forecast Visualization", 0, 1)
     if os.path.exists(forecast_plot_path):
         pdf.image(forecast_plot_path, x=10, y=None, w=180)
     else:
-        pdf.set_font('Arial', '', 10)
-        pdf.cell(0, 10, 'Forecast plot image not available.', 0, 1)
+        pdf.set_font("Arial", "", 10)
+        pdf.cell(0, 10, "Forecast plot image not available.", 0, 1)
     pdf.ln(5)
     
     # Model Evaluation Plot (if available)
     if model_eval_plot_path and os.path.exists(model_eval_plot_path):
         pdf.add_page()
-        pdf.set_font('Arial', 'B', 12)
-        pdf.cell(0, 10, 'Model Evaluation', 0, 1)
+        pdf.set_font("Arial", "B", 12)
+        pdf.cell(0, 10, "Model Evaluation", 0, 1)
         pdf.image(model_eval_plot_path, x=10, y=None, w=180)
         pdf.ln(5)
     
     # Training Loss Plot (if available)
     if loss_plot_path and os.path.exists(loss_plot_path):
         pdf.add_page()
-        pdf.set_font('Arial', 'B', 12)
-        pdf.cell(0, 10, 'Model Training History', 0, 1)
+        pdf.set_font("Arial", "B", 12)
+        pdf.cell(0, 10, "Model Training History", 0, 1)
         pdf.image(loss_plot_path, x=10, y=None, w=180)
         pdf.ln(5)
     
     # AI Analysis (if available)
     if ai_analysis:
         pdf.add_page()
-        pdf.set_font('Arial', 'B', 12)
-        pdf.cell(0, 10, 'AI Analysis of Forecast Results', 0, 1)
-        pdf.set_font('Arial', '', 10)
+        pdf.set_font("Arial", "B", 12)
+        pdf.cell(0, 10, "AI Analysis of Forecast Results", 0, 1)
+        pdf.set_font("Arial", "", 10)
         
         # Split the analysis into paragraphs and add them to the PDF
-        paragraphs = ai_analysis.split('\n\n')
+        paragraphs = ai_analysis.split("\n\n")
         for paragraph in paragraphs:
             pdf.multi_cell(0, 10, paragraph)
             pdf.ln(5)
@@ -1308,7 +1310,7 @@ def main():
         page = st.radio("Select Page", ["Home", "Forecasting", "AI Report", "AI Chat", "Admin Dashboard"])
         
         # About section
-        st.markdown('<div class="about-us-header">About DeepHydro AI</div>', unsafe_allow_html=True)
+        st.markdown("<div class=\"about-us-header\">About DeepHydro AI</div>", unsafe_allow_html=True)
         st.markdown("""
         <div class="about-us-content">
         DeepHydro AI combines deep learning with hydrological expertise to provide accurate groundwater level forecasting.
@@ -1374,7 +1376,7 @@ def main():
             st.markdown("""
             <div class="auth-required">
                 <h3>Authentication Required</h3>
-                <p>You've reached the usage limit for this feature. Please sign in with your Google account to continue using the forecasting feature.</p>
+                <p>You"ve reached the usage limit for this feature. Please sign in with your Google account to continue using the forecasting feature.</p>
             </div>
             """, unsafe_allow_html=True)
             
@@ -1615,7 +1617,7 @@ def main():
             st.markdown("""
             <div class="auth-required">
                 <h3>Authentication Required</h3>
-                <p>You've reached the usage limit for this feature. Please sign in with your Google account to continue using the AI Report feature.</p>
+                <p>You"ve reached the usage limit for this feature. Please sign in with your Google account to continue using the AI Report feature.</p>
             </div>
             """, unsafe_allow_html=True)
             
@@ -1648,7 +1650,7 @@ def main():
                 
                 # Check for required columns
                 if "Date" not in historical_df.columns or not any(col for col in historical_df.columns if col in ["Level", "Value", "Groundwater"]):
-                    st.error("Historical data must contain 'Date' column and a level column (named 'Level', 'Value', or 'Groundwater').")
+                    st.error("Historical data must contain "Date" column and a level column (named "Level", "Value", or "Groundwater").")
                     st.stop()
                 
                 # Rename level column if needed
@@ -1674,7 +1676,7 @@ def main():
                 
                 # Check for required columns
                 if "Date" not in forecast_df.columns or not any(col for col in forecast_df.columns if col in ["Forecast", "Prediction", "Value"]):
-                    st.error("Forecast data must contain 'Date' column and a forecast column (named 'Forecast', 'Prediction', or 'Value').")
+                    st.error("Forecast data must contain "Date" column and a forecast column (named "Forecast", "Prediction", or "Value").")
                     st.stop()
                 
                 # Rename forecast column if needed
@@ -1757,7 +1759,7 @@ def main():
             st.markdown("""
             <div class="auth-required">
                 <h3>Authentication Required</h3>
-                <p>You've reached the usage limit for this feature. Please sign in with your Google account to continue using the AI Chat feature.</p>
+                <p>You"ve reached the usage limit for this feature. Please sign in with your Google account to continue using the AI Chat feature.</p>
             </div>
             """, unsafe_allow_html=True)
             
@@ -1805,7 +1807,7 @@ def main():
                     st.session_state.chat_history.append({"role": "user", "content": user_message})
                     
                     # Add AI response to chat history (simplified for this version)
-                    ai_response = "I'm the DeepHydro AI assistant. I can help you with groundwater forecasting and analysis. What would you like to know?"
+                    ai_response = "I"m the DeepHydro AI assistant. I can help you with groundwater forecasting and analysis. What would you like to know?"
                     st.session_state.chat_history.append({"role": "assistant", "content": ai_response})
                     
                     # Rerun to update UI
