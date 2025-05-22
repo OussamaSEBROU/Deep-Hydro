@@ -31,14 +31,20 @@ def initialize_firebase():
     Initialize Firebase with secure credential management.
     Loads credentials from environment variables for secure deployment.
     """
+    # Load environment variables from .env file if it exists (for local development)
     load_dotenv()
+    
+    # Check if Firebase is already initialized
     if not firebase_admin._apps:
         try:
-            firebase_creds_json = os.getenv("FIREBASE_SERVICE_ACCOUNT")
+            # Get Firebase credentials from environment variable
+            firebase_creds_json = os.getenv('FIREBASE_SERVICE_ACCOUNT')
+            
             if firebase_creds_json:
+                # Parse the JSON string from environment variable
                 cred_dict = json.loads(firebase_creds_json)
                 cred = credentials.Certificate(cred_dict)
-                firebase_url = os.getenv("FIREBASE_DATABASE_URL", 
+                firebase_url = os.getenv('FIREBASE_DATABASE_URL', 
                                         f"https://{cred_dict.get('project_id')}-default-rtdb.firebaseio.com/")
                 firebase_admin.initialize_app(cred, {
                     'databaseURL': firebase_url
@@ -304,7 +310,7 @@ def log_visitor_activity(page_name, action="page_view"):
         # print(f"Error logging visitor activity: {e}") 
         pass
 
-def fetch_visitor_logs(): # MODIFIED for new structure
+def fetch_visitor_logs():
     """
     Fetch visitor logs from Firebase for admin viewing.
     Returns a pandas DataFrame with the visitor data.
@@ -313,68 +319,29 @@ def fetch_visitor_logs(): # MODIFIED for new structure
         return pd.DataFrame()
     
     try:
-        activity_ref = db.reference("user_activity")
-        all_user_activity = activity_ref.get()
-        
-        metadata_ref = db.reference("user_metadata")
-        all_user_metadata = metadata_ref.get() or {}
-        
-        if not all_user_activity:
+        ref = db.reference("visitor_logs")
+        logs = ref.get()
+        if logs:
+            visitors_list = []
+            for log_id, data in logs.items():
+                data["log_id"] = log_id
+                visitors_list.append(data)
+            df = pd.DataFrame(visitors_list)
+            df["timestamp"] = pd.to_datetime(df["timestamp"])
+            df = df.sort_values("timestamp", ascending=False)
+            return df
+        else:
             return pd.DataFrame()
-        
-        visitors_list = []
-        for user_id, activities in all_user_activity.items():
-            user_metadata = all_user_metadata.get(user_id, {})
-            first_visit = user_metadata.get("first_visit", "N/A")
-            total_visits = user_metadata.get("visit_count", "N/A")
-            
-            if activities and isinstance(activities, dict):
-                for activity_id, data in activities.items():
-                    if isinstance(data, dict): # Ensure data is a dictionary
-                        data["activity_id"] = activity_id
-                        data["user_id"] = user_id
-                        data["first_visit"] = first_visit
-                        data["total_visits"] = total_visits
-                        # Rename for clarity in dashboard
-                        data["page"] = data.pop("page_or_feature", "N/A") 
-                        visitors_list.append(data)
-        
-        if not visitors_list:
-             return pd.DataFrame()
-             
-        df = pd.DataFrame(visitors_list)
-        
-        # Convert timestamp to datetime (handle potential errors)
-        df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
-        df["first_visit"] = pd.to_datetime(df["first_visit"], errors="coerce")
-        
-        # Sort by timestamp (most recent first)
-        df = df.sort_values("timestamp", ascending=False)
-        
-        # Select and reorder columns for display
-        cols_to_show = [
-            "timestamp", "user_id", "is_authenticated", "visit_number", 
-            "total_visits", "first_visit", "page", "action", 
-            "ip_address", "session_id", "user_agent", "activity_id"
-        ]
-        # Ensure all expected columns exist, add missing ones with NaN
-        for col in cols_to_show:
-            if col not in df.columns:
-                df[col] = pd.NA 
-                
-        return df[cols_to_show]
     except Exception as e:
         st.error(f"Error fetching visitor logs: {e}")
-        import traceback
-        st.error(traceback.format_exc()) # More detailed error for debugging
         return pd.DataFrame()
 
-def create_visitor_charts(visitor_df): # MODIFIED for new fields
+def create_visitor_charts(visitor_df):
     """
     Create visualizations of visitor data using Plotly.
     
     Args:
-        visitor_df: DataFrame containing visitor data (new structure)
+        visitor_df: DataFrame containing visitor data
     
     Returns: List of Plotly figures
     """
@@ -384,224 +351,91 @@ def create_visitor_charts(visitor_df): # MODIFIED for new fields
     figures = []
     
     try:
+        # 1. Daily Visitors Chart
         df = visitor_df.copy()
         df["date"] = df["timestamp"].dt.date
-        
-        # --- Enhanced Charts --- 
-        
-        # 1. Daily Active Users (Authenticated vs Anonymous)
-        daily_users = df.drop_duplicates(subset=["date", "user_id"])
-        daily_counts = daily_users.groupby(["date", "is_authenticated"]).size().unstack(fill_value=0).reset_index()
+        daily_counts = df.groupby("date").size().reset_index(name="count")
         daily_counts["date"] = pd.to_datetime(daily_counts["date"])
-        daily_counts = daily_counts.rename(columns={True: "Authenticated", False: "Anonymous"})
         
-        fig1 = go.Figure()
-        if "Authenticated" in daily_counts.columns:
-            fig1.add_trace(go.Bar(x=daily_counts["date"], y=daily_counts["Authenticated"], name="Authenticated Users"))
-        if "Anonymous" in daily_counts.columns:
-            fig1.add_trace(go.Bar(x=daily_counts["date"], y=daily_counts["Anonymous"], name="Anonymous Users"))
-        fig1.update_layout(barmode="stack", title="Daily Active Users (Authenticated vs. Anonymous)", 
-                           xaxis_title="Date", yaxis_title="Number of Unique Users")
+        fig1 = px.line(daily_counts, x="date", y="count", 
+                      title="Daily Visitors",
+                      labels={"count": "Number of Visitors", "date": "Date"})
         figures.append(fig1)
         
-        # 2. Feature Engagement Chart (using 'action' == 'feature_engaged')
-        feature_engagement = df[df["action"] == "feature_engaged"]["page"].value_counts().reset_index()
-        feature_engagement.columns = ["feature", "count"]
+        # 2. Page Views Pie Chart
+        page_counts = df["page"].value_counts().reset_index()
+        page_counts.columns = ["page", "count"]
         
-        if not feature_engagement.empty:
-            fig2 = px.bar(feature_engagement, x="feature", y="count",
-                         title="Advanced Feature Engagement",
-                         labels={"count": "Number of Engagements", "feature": "Feature"})
-            figures.append(fig2)
-        else:
-            # Placeholder if no engagement data
-            fig2 = go.Figure()
-            fig2.update_layout(title="Advanced Feature Engagement (No Data)")
-            fig2.add_annotation(text="No advanced feature engagement recorded yet.", xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
-            figures.append(fig2)
-            
-        # 3. User Actions Pie Chart (excluding page_view for clarity)
-        action_counts = df[df["action"] != "page_view"]["action"].value_counts().reset_index()
-        action_counts.columns = ["action", "count"]
-        if not action_counts.empty:
-            fig3 = px.pie(action_counts, values="count", names="action", title="User Actions (Excluding Page Views)")
-            figures.append(fig3)
-            
-        # 4. Hourly Activity Heatmap (Remains similar, uses timestamp)
-        try:
-            df["hour"] = df["timestamp"].dt.hour
-            df["day_of_week"] = df["timestamp"].dt.day_name()
-            day_order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-            hourly_activity = df.groupby(["day_of_week", "hour"]).size().reset_index(name="count")
-            
-            if not hourly_activity.empty:
-                hourly_pivot = hourly_activity.pivot_table(values="count", index="day_of_week", columns="hour", fill_value=0)
-                available_days = list(set(hourly_pivot.index) & set(day_order))
-                ordered_available_days = [day for day in day_order if day in available_days]
-                hourly_pivot = hourly_pivot.reindex(ordered_available_days)
-                available_hours = sorted(hourly_pivot.columns)
-                
-                fig4 = px.imshow(hourly_pivot, 
-                                labels=dict(x="Hour of Day", y="Day of Week", color="Activity Count"),
-                                x=[str(h) for h in available_hours],
-                                y=ordered_available_days,
-                                title="User Activity by Hour and Day")
-                figures.append(fig4)
-            else:
-                raise ValueError("No hourly activity data to pivot.")
-        except Exception as heatmap_err:
-            st.warning(f"Could not generate hourly activity heatmap: {heatmap_err}")
-            fig4 = go.Figure()
-            fig4.update_layout(title="Visitor Activity by Hour and Day (No Data/Error)")
-            fig4.add_annotation(text="Not enough data or error generating heatmap.", xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
+        fig2 = px.pie(page_counts, values="count", names="page", title="Page Views Distribution")
+        figures.append(fig2)
+        
+        # 3. Hourly Activity Heatmap
+        df["hour"] = df["timestamp"].dt.hour
+        df["day_of_week"] = df["timestamp"].dt.day_name()
+        
+        day_order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+        hourly_activity = df.groupby(["day_of_week", "hour"]).size().reset_index(name="count")
+        
+        hourly_pivot = hourly_activity.pivot_table(values="count", index="day_of_week", columns="hour", fill_value=0)
+        hourly_pivot = hourly_pivot.reindex(day_order)
+        
+        fig3 = px.imshow(hourly_pivot, 
+                        labels=dict(x="Hour of Day", y="Day of Week", color="Visitor Count"),
+                        x=[str(h) for h in range(24)],
+                        y=day_order,
+                        title="Visitor Activity by Hour and Day")
+        figures.append(fig3)
+        
+        # 4. Session Duration Distribution
+        if "session_duration" in df.columns:
+            fig4 = px.histogram(df, x="session_duration", nbins=20,
+                               title="Session Duration Distribution",
+                               labels={"session_duration": "Session Duration (seconds)"})
             figures.append(fig4)
             
-        # 5. New vs Returning Users (based on visit_number)
-        user_types = df.drop_duplicates(subset=["user_id"])
-        user_types["user_type"] = user_types["visit_number"].apply(lambda x: "New" if x == 1 else "Returning")
-        user_type_counts = user_types["user_type"].value_counts().reset_index()
-        user_type_counts.columns = ["type", "count"]
-        if not user_type_counts.empty:
-             fig5 = px.pie(user_type_counts, values="count", names="type", title="New vs. Returning Users")
-             figures.append(fig5)
-
+        # 5. User Agent Distribution
+        if "user_agent" in df.columns:
+            # Extract browser info from user agent
+            def extract_browser(ua):
+                if pd.isna(ua) or ua == "Unknown":
+                    return "Unknown"
+                ua = ua.lower()
+                if "chrome" in ua:
+                    return "Chrome"
+                elif "firefox" in ua:
+                    return "Firefox"
+                elif "safari" in ua and "chrome" not in ua:  # Chrome also contains Safari in UA
+                    return "Safari"
+                elif "edge" in ua:
+                    return "Edge"
+                elif "opera" in ua:
+                    return "Opera"
+                else:
+                    return "Other"
+            
+            df["browser"] = df["user_agent"].apply(extract_browser)
+            browser_counts = df["browser"].value_counts().reset_index()
+            browser_counts.columns = ["browser", "count"]
+            
+            fig5 = px.bar(browser_counts, x="browser", y="count",
+                         title="Browser Distribution",
+                         labels={"count": "Number of Visitors", "browser": "Browser"})
+            figures.append(fig5)
+    
     except Exception as e:
         st.error(f"Error creating visitor charts: {e}")
-        import traceback
-        st.error(traceback.format_exc())
         return []
     
     return figures
 
-# --- Admin Analytics Dashboard (MODIFIED for Auth & Data) ---
+# --- Admin Analytics Dashboard ---
 def render_admin_analytics():
-    """Render the admin analytics dashboard, restricted to admin users."""
-    st.header("Admin Analytics Dashboard")
+    # Log tab view
+    if firebase_initialized:
+        log_visitor_activity("Tab", "view_admin_analytics")
     
-    # REQUIREMENT 4: Restricted Access to Analytics Dashboard
-    if not is_user_authenticated():
-        st.warning("Access Denied. Please log in with an authorized admin Google account.")
-        display_google_login() # Show login prompt
-        return
-        
-    if not is_admin_user():
-        st.error(f"Access Denied. User {get_authenticated_user_email()} is not authorized to view analytics.")
-        # Optionally log unauthorized access attempt
-        log_visitor_activity("Admin Analytics", "access_denied")
-        return
-        
-    # If authenticated and is admin, proceed:
-    st.success(f"Welcome, Admin {get_authenticated_user_email()}!")
-    log_visitor_activity("Admin Analytics", "access_granted") # Log successful access
-    
-    # Fetch visitor logs (using the modified function)
-    visitor_df = fetch_visitor_logs()
-    
-    if visitor_df.empty:
-        st.info("No visitor data available yet.")
-        return
-    
-    # Display visitor statistics (using new fields)
-    st.subheader("Overall User Statistics")
-    col1, col2, col3 = st.columns(3)
-    
-    unique_users = visitor_df["user_id"].nunique()
-    auth_users = visitor_df[visitor_df["is_authenticated"] == True]["user_id"].nunique()
-    anon_users = unique_users - auth_users
-    
-    with col1:
-        st.metric("Total Unique Users", unique_users)
-    with col2:
-        st.metric("Authenticated Users", auth_users)
-    with col3:
-        st.metric("Anonymous Users", anon_users)
-        
-    # Display total activities logged
-    st.metric("Total Activities Logged", len(visitor_df))
-
-    # Create and display visualizations (using the modified function)
-    st.subheader("User Analytics Visualizations")
-    try:
-        charts = create_visitor_charts(visitor_df)
-        for fig in charts:
-            st.plotly_chart(fig, use_container_width=True)
-    except Exception as chart_err:
-        st.error(f"Error displaying charts: {chart_err}")
-    
-    # Display raw data with filters
-    st.subheader("Raw Activity Data")
-    
-    # Add filters (adjust based on new columns)
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        try:
-            # Ensure timestamp column exists and has valid data before filtering
-            if "timestamp" in visitor_df.columns and not visitor_df["timestamp"].isnull().all():
-                min_date = visitor_df["timestamp"].min().date() if pd.notna(visitor_df["timestamp"].min()) else datetime.date.today()
-                max_date = visitor_df["timestamp"].max().date() if pd.notna(visitor_df["timestamp"].max()) else datetime.date.today()
-                date_range = st.date_input("Filter by Date Range", [min_date, max_date])
-            else:
-                st.warning("Timestamp data missing or invalid for date filtering.")
-                date_range = None
-        except Exception as date_err:
-            st.warning(f"Could not set date range filter: {date_err}")
-            date_range = None
-    
-    with col2:
-        try:
-            if "page" in visitor_df.columns:
-                page_options = visitor_df["page"].unique()
-                page_filter = st.multiselect("Filter by Page/Feature", options=page_options, default=[])
-            else:
-                page_filter = []
-        except Exception as page_err:
-            st.warning(f"Could not set page filter: {page_err}")
-            page_filter = []
-            
-    with col3:
-        try:
-            auth_filter = st.selectbox("Filter by Auth Status", ["All", "Authenticated", "Anonymous"], index=0)
-        except Exception as auth_err:
-            st.warning(f"Could not set auth filter: {auth_err}")
-            auth_filter = "All"
-
-    # Apply filters
-    try:
-        filtered_df = visitor_df.copy()
-        
-        # Date filter
-        if date_range and len(date_range) == 2 and "timestamp" in filtered_df.columns:
-            start_date, end_date = date_range
-            # Ensure comparison is between date objects
-            filtered_df = filtered_df[filtered_df["timestamp"].notna() & 
-                                      (filtered_df["timestamp"].dt.date >= start_date) & 
-                                      (filtered_df["timestamp"].dt.date <= end_date)]
-        
-        # Page/Feature filter
-        if page_filter and "page" in filtered_df.columns:
-            filtered_df = filtered_df[filtered_df["page"].isin(page_filter)]
-            
-        # Auth Status filter
-        if "is_authenticated" in filtered_df.columns:
-            if auth_filter == "Authenticated":
-                filtered_df = filtered_df[filtered_df["is_authenticated"] == True]
-            elif auth_filter == "Anonymous":
-                filtered_df = filtered_df[filtered_df["is_authenticated"] == False]
-        
-        # Display the filtered data
-        st.dataframe(filtered_df)
-        
-        # Export options
-        if st.button("Export Filtered Data to CSV"): 
-            csv = filtered_df.to_csv(index=False)
-            b64 = base64.b64encode(csv.encode()).decode()
-            href = f'<a href="data:file/csv;base64,{b64}" download="filtered_activity_logs.csv">Download CSV File</a>'
-            st.markdown(href, unsafe_allow_html=True)
-            log_visitor_activity("Admin Analytics", "export_csv") # Log export
-            
-    except Exception as filter_err:
-        st.error(f"Error applying filters or displaying data: {filter_err}")
-        st.dataframe(visitor_df) # Show unfiltered data on error
+    # Render the admin analytics dashboard
+    render_admin_analytics()
 
 # --- Custom CSS (No changes needed based on requirements) ---
 def apply_custom_css():
@@ -1155,8 +989,11 @@ with tabs[4]:
             st.session_state.chat_history.append(("AI", ai_response))
             st.rerun()
 
-# Admin Analytics Tab (Index 5)
+# Admin Analytics Tab
 with tabs[5]:
-    log_visitor_activity("Tab: Admin Analytics", "view_attempt")
-    # Access control is handled *inside* render_admin_analytics
+    # Log tab view
+    if firebase_initialized:
+        log_visitor_activity("Tab", "view_admin_analytics")
+    
+    # Render the admin analytics dashboard
     render_admin_analytics()
