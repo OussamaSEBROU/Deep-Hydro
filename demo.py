@@ -691,8 +691,11 @@ if GEMINI_API_KEY and GEMINI_API_KEY != "Gemini_api_key":
     try:
         genai.configure(api_key=GEMINI_API_KEY)
         generation_config = genai.types.GenerationConfig(temperature=0.7, top_p=0.95, top_k=40, max_output_tokens=4000)
-        gemini_model_report = genai.GenerativeModel(model_name="gemini-pro", generation_config=generation_config) # Using standard gemini-pro
-        gemini_model_chat = genai.GenerativeModel(model_name="gemini-pro", generation_config=generation_config)
+        gemini_model_report = genai.GenerativeModel(model_name="gemini-2.0-flash-thinking-exp-01-21", generation_config=generation_config)
+            
+
+ # Using standard gemini-pro
+        gemini_model_chat = genai.GenerativeModel(model_name="gemini-2.0-flash-thinking-exp-01-21", generation_config=generation_config)
         gemini_configured = True
     except Exception as e:
         st.error(f"Error configuring Gemini API: {e}. AI features might be limited.")
