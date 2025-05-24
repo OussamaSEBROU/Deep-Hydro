@@ -42,12 +42,10 @@ def initialize_firebase():
             if firebase_creds_json:
                 cred_dict = json.loads(firebase_creds_json)
                 cred = credentials.Certificate(cred_dict)
-                firebase_url = os.getenv("FIREBASE_DATABASE_URL",
-                                        f"https://{cred_dict.get("project_id")}-default-rtdb.firebaseio.com/")
+                firebase_url = os.getenv("FIREBASE_DATABASE_URL", f"https://{cred_dict.get('project_id')}-default-rtdb.firebaseio.com/")
                 firebase_admin.initialize_app(cred, {
                     "databaseURL": firebase_url
-                })
-                # st.success("Firebase initialized successfully.") # Optional: for debugging
+                })              # st.success("Firebase initialized successfully.") # Optional: for debugging
                 return True
             else:
                 st.warning("Firebase credentials not found. Analytics and usage tracking are disabled.")
@@ -1261,7 +1259,7 @@ with tabs[3]:
     if not gemini_configured: st.warning("AI features disabled. Configure Gemini API Key.")
     if st.session_state.ai_report: 
         st.markdown(f'<div class="chat-message ai-message">{st.session_state.ai_report}<span class="copy-tooltip">Copied!</span></div>', unsafe_allow_html=True)
-    else: st.info("Click "Generate AI Report" (sidebar) after a forecast.")
+    else: st.info("Click 'Generate AI Report' (sidebar) after a forecast.")
 
 # AI Chatbot Tab (Requires activation and access check in sidebar)
 with tabs[4]:
@@ -1298,7 +1296,7 @@ with tabs[4]:
             st.session_state.chat_active = False # Deactivate if context is missing
             st.rerun()
     else:
-        st.info("Click "Activate Chat" (sidebar) after a forecast." if gemini_configured else "AI Chat disabled.")
+        st.info("Click \'Activate Chat\' (sidebar) after a forecast." if gemini_configured else "AI Chat disabled.")
 
 # Admin Analytics Tab (Access controlled within the function)
 with tabs[5]:
