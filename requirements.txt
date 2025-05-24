@@ -11,3 +11,4 @@ kaleido
 firebase-admin
 python-dotenv
 requests
+streamlit-oauth
