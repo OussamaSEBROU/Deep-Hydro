@@ -953,7 +953,7 @@ if st.session_state.standard_model is None and os.path.exists(STANDARD_MODEL_PAT
     st.session_state.standard_model, st.session_state.standard_model_seq_len = load_standard_model_cached(STANDARD_MODEL_PATH)
 
 # --- Sidebar --- 
-st.sidebar.image("logo.png", width=100)
+#st.sidebar.image("logo.png", width=100)
 st.sidebar.title("DeepHydro AI")
 st.sidebar.markdown("--- Options ---")
 
