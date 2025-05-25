@@ -1,4 +1,9 @@
 import streamlit as st
+
+# --- Page Configuration & Initialization ---
+# MUST BE THE FIRST STREAMLIT COMMAND
+st.set_page_config(page_title="DeepHydro AI Forecasting", layout="wide")
+
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import MinMaxScaler
@@ -29,18 +34,15 @@ from streamlit_oauth import OAuth2Component
 
 # --- Load Configuration from Single Environment Variable --- 
 APP_CONFIG = {}
-firebase_initialized = False
-gemini_configured = False
-google_oauth_configured = False
-admin_password = "admin123" # Default fallback
+config_load_error = None # Store potential errors here
 
 def load_app_config():
     """Load configuration from APP_CONFIG_JSON environment variable."""
-    global APP_CONFIG
+    global APP_CONFIG, config_load_error
     load_dotenv() # Load .env for local development first
     config_json_str = os.getenv("APP_CONFIG_JSON")
     if not config_json_str:
-        st.error("Critical: APP_CONFIG_JSON environment variable not found. Application cannot be configured.")
+        config_load_error = "Critical: APP_CONFIG_JSON environment variable not found."
         return False
     try:
         APP_CONFIG = json.loads(config_json_str)
@@ -51,91 +53,27 @@ def load_app_config():
            not APP_CONFIG["google_oauth"].get("client_id") or \
            not APP_CONFIG["google_oauth"].get("client_secret") or \
            not APP_CONFIG["google_oauth"].get("redirect_uri"):
-            st.error("APP_CONFIG_JSON is missing required keys (firebase_service_account, google_oauth, google_api_key, etc.). Check the structure.")
+            config_load_error = "APP_CONFIG_JSON is missing required keys (firebase_service_account, google_oauth, google_api_key, etc.). Check the structure."
             return False
         # print("DEBUG: APP_CONFIG loaded successfully.") # Debug
         return True
     except json.JSONDecodeError as e:
-        st.error(f"Error decoding APP_CONFIG_JSON: {e}. Check if it is valid JSON.")
+        config_load_error = f"Error decoding APP_CONFIG_JSON: {e}. Check if it is valid JSON."
         return False
     except Exception as e:
-        st.error(f"Unexpected error loading APP_CONFIG_JSON: {e}")
+        config_load_error = f"Unexpected error loading APP_CONFIG_JSON: {e}"
         return False
 
 config_loaded = load_app_config()
 
-# --- Constants ---
-ADVANCED_FEATURE_LIMIT = 3
+# --- Initialize Services (Firebase, Gemini, OAuth, Admin Pass) --- 
+firebase_initialized = False
+gemini_configured = False
+google_oauth_configured = False
+admin_password = "admin123" # Default fallback
+service_init_errors = [] # Store initialization errors
 
-# --- Firebase Configuration --- 
-def initialize_firebase_from_config():
-    """Initialize Firebase using credentials from APP_CONFIG."""
-    global firebase_initialized
-    if not config_loaded or firebase_initialized: # Don't re-initialize
-        return firebase_initialized
-        
-    if not firebase_admin._apps:
-        try:
-            firebase_creds_dict = APP_CONFIG.get("firebase_service_account")
-            if not firebase_creds_dict or not isinstance(firebase_creds_dict, dict):
-                st.warning("Firebase service account details not found or invalid in APP_CONFIG_JSON. Analytics disabled.")
-                return False
-                
-            cred = credentials.Certificate(firebase_creds_dict)
-            project_id = firebase_creds_dict.get("project_id")
-            if not project_id:
-                st.error("Firebase Service Account JSON in config is missing 'project_id'. Cannot determine Database URL.")
-                return False
-                
-            # Allow overriding DB URL via config if needed, otherwise construct it
-            firebase_url = APP_CONFIG.get("firebase_database_url", f"https://{project_id}-default-rtdb.firebaseio.com/")
-            
-            firebase_admin.initialize_app(cred, {"databaseURL": firebase_url})
-            # st.success("Firebase initialized successfully from config.") # Debug
-            firebase_initialized = True
-            return True
-            
-        except Exception as e:
-            st.warning(f"Firebase initialization error from config: {e}. Analytics disabled.")
-            firebase_initialized = False
-            return False
-            
-    firebase_initialized = True # Already initialized
-    return True
-
-# Initialize Firebase immediately after loading config
-firebase_initialized = initialize_firebase_from_config()
-
-# --- Gemini API Configuration ---
-def configure_gemini_from_config():
-    """Configure Gemini API using key from APP_CONFIG."""
-    global gemini_configured, gemini_model_report, gemini_model_chat
-    if not config_loaded or gemini_configured:
-        return gemini_configured
-        
-    GEMINI_API_KEY = APP_CONFIG.get("google_api_key")
-    if GEMINI_API_KEY and GEMINI_API_KEY != "YOUR_GEMINI_API_KEY": # Check for placeholder
-        try:
-            genai.configure(api_key=GEMINI_API_KEY)
-            generation_config = genai.types.GenerationConfig(temperature=0.7, top_p=0.95, top_k=40, max_output_tokens=4000)
-            gemini_model_report = genai.GenerativeModel(model_name="gemini-pro", generation_config=generation_config)
-            gemini_model_chat = genai.GenerativeModel(model_name="gemini-pro", generation_config=generation_config)
-            gemini_configured = True
-            # st.success("Gemini configured successfully from config.") # Debug
-            return True
-        except Exception as e:
-            st.error(f"Error configuring Gemini API from config: {e}. AI features might be limited.")
-            gemini_configured = False
-            return False
-    else:
-        st.warning("Gemini API Key (google_api_key) not found or is placeholder in APP_CONFIG_JSON. AI features disabled.")
-        gemini_configured = False
-        return False
-
-# Configure Gemini immediately
-gemini_configured = configure_gemini_from_config()
-
-# --- Google OAuth Configuration --- 
+# --- Google OAuth Global Variables (needed by streamlit-oauth) ---
 CLIENT_ID = None
 CLIENT_SECRET = None
 REDIRECT_URI = None
@@ -143,12 +81,50 @@ AUTHORIZE_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
 REVOKE_ENDPOINT = "https://oauth2.googleapis.com/revoke"
 
-def load_oauth_config():
-    """Load Google OAuth credentials from APP_CONFIG."""
-    global google_oauth_configured, CLIENT_ID, CLIENT_SECRET, REDIRECT_URI
-    if not config_loaded or google_oauth_configured:
-        return google_oauth_configured
-        
+def initialize_services():
+    """Initialize Firebase, Gemini, OAuth, Admin Pass from loaded config."""
+    global firebase_initialized, gemini_configured, google_oauth_configured, admin_password, service_init_errors
+    global CLIENT_ID, CLIENT_SECRET, REDIRECT_URI # Make sure globals are modified
+
+    if not config_loaded: # Don't proceed if config didn't load
+        return
+
+    # --- Firebase --- 
+    if not firebase_admin._apps:
+        try:
+            firebase_creds_dict = APP_CONFIG.get("firebase_service_account")
+            if not firebase_creds_dict or not isinstance(firebase_creds_dict, dict):
+                service_init_errors.append("Firebase service account details not found or invalid in config.")
+            else:
+                cred = credentials.Certificate(firebase_creds_dict)
+                project_id = firebase_creds_dict.get("project_id")
+                if not project_id:
+                    service_init_errors.append("Firebase Service Account JSON in config is missing 'project_id'.")
+                else:
+                    firebase_url = APP_CONFIG.get("firebase_database_url", f"https://{project_id}-default-rtdb.firebaseio.com/")
+                    firebase_admin.initialize_app(cred, {"databaseURL": firebase_url})
+                    firebase_initialized = True
+        except Exception as e:
+            service_init_errors.append(f"Firebase initialization error: {e}")
+            firebase_initialized = False
+    else:
+        firebase_initialized = True # Already initialized
+
+    # --- Gemini --- 
+    GEMINI_API_KEY = APP_CONFIG.get("google_api_key")
+    if GEMINI_API_KEY and GEMINI_API_KEY != "YOUR_GEMINI_API_KEY":
+        try:
+            genai.configure(api_key=GEMINI_API_KEY)
+            # Keep model setup simple here, move config details later if needed
+            gemini_configured = True
+        except Exception as e:
+            service_init_errors.append(f"Error configuring Gemini API: {e}")
+            gemini_configured = False
+    else:
+        service_init_errors.append("Gemini API Key not found or is placeholder in config.")
+        gemini_configured = False
+
+    # --- Google OAuth --- 
     oauth_config = APP_CONFIG.get("google_oauth")
     if oauth_config and isinstance(oauth_config, dict):
         CLIENT_ID = oauth_config.get("client_id")
@@ -156,470 +132,95 @@ def load_oauth_config():
         REDIRECT_URI = oauth_config.get("redirect_uri")
         if all([CLIENT_ID, CLIENT_SECRET, REDIRECT_URI]):
             google_oauth_configured = True
-            # print("DEBUG: Google OAuth configured successfully from config.") # Debug
-            return True
         else:
-            st.error("Google OAuth config in APP_CONFIG_JSON is missing client_id, client_secret, or redirect_uri.")
+            service_init_errors.append("Google OAuth config missing client_id, client_secret, or redirect_uri.")
             google_oauth_configured = False
-            return False
     else:
-        st.error("Google OAuth config section ('google_oauth') missing or invalid in APP_CONFIG_JSON.")
+        service_init_errors.append("Google OAuth config section ('google_oauth') missing or invalid.")
         google_oauth_configured = False
-        return False
 
-# Load OAuth config immediately
-google_oauth_configured = load_oauth_config()
+    # --- Admin Password --- 
+    admin_password = APP_CONFIG.get("admin_password", "admin123")
 
-# --- Admin Password Configuration ---
-def load_admin_password():
-    """Load Admin Password from APP_CONFIG."""
-    global admin_password
-    if config_loaded:
-        admin_password = APP_CONFIG.get("admin_password", "admin123") # Use default if not found
-    # print(f"DEBUG: Admin password set to: {'*' * len(admin_password)}") # Debug
+# --- Main App Logic --- 
+if not config_loaded:
+    st.error(config_load_error) # Display config load error AFTER set_page_config
+else:
+    initialize_services() # Initialize services AFTER set_page_config
 
-load_admin_password()
+    # Display service init errors if any
+    if service_init_errors:
+        for error_msg in service_init_errors:
+            st.warning(error_msg) # Use warning for non-critical init issues
 
-# --- User Identification & Tracking (No changes needed here) ---
-def get_client_ip():
-    """Get the client's IP address if available."""
-    try:
-        response = requests.get("https://httpbin.org/ip", timeout=3)
-        response.raise_for_status()
-        return response.json().get("origin", "Unknown")
-    except requests.exceptions.RequestException:
-        return "Unknown"
-    except Exception:
-        return "Unknown"
+    # --- Constants ---
+    ADVANCED_FEATURE_LIMIT = 3
 
-def get_persistent_user_id():
-    """Generate or retrieve a persistent user ID."""
-    if st.session_state.get("auth_status") == "authenticated" and st.session_state.get("user_email"):
-        user_id = st.session_state.user_email
-        if st.session_state.get("persistent_user_id") != user_id:
-             st.session_state.persistent_user_id = user_id
-        return user_id
-    if "persistent_user_id" in st.session_state and st.session_state.persistent_user_id:
-        return st.session_state.persistent_user_id
-    ip_address = get_client_ip()
-    user_agent = st.session_state.get("user_agent", "Unknown")
-    hash_input = f"{ip_address}-{user_agent}"
-    hashed_id = hashlib.sha256(hash_input.encode()).hexdigest()
-    persistent_id = f"anon_{hashed_id}"
-    st.session_state.persistent_user_id = persistent_id
-    return persistent_id
-
-def update_firebase_profile_on_login(email):
-    """Update Firebase profile when a user logs in via Google OAuth."""
-    if not firebase_initialized or not email:
-        return
-    try:
-        ref = db.reference(f"users/{email}")
-        profile = ref.get()
-        now_iso = datetime.datetime.now().isoformat()
-        update_data = {
-            "is_authenticated": True,
-            "last_login_google": now_iso,
-            "user_id": email
-        }
-        if profile is None:
-            update_data["first_visit"] = now_iso
-            update_data["visit_count"] = 1
-            update_data["feature_usage_count"] = 0
-            update_data["last_visit"] = now_iso
-            ref.set(update_data)
-            st.session_state.user_profile = update_data
-        else:
-            ref.update(update_data)
-            st.session_state.user_profile = ref.get()
-        log_visitor_activity("Authentication", action="google_login_success", details={"email": email})
-    except Exception as e:
-        st.error(f"Firebase error updating profile after Google login for {email}: {e}")
-        log_visitor_activity("Authentication", action="google_login_firebase_update_fail", details={"email": email, "error": str(e)})
-
-def get_or_create_user_profile(user_id):
-    """Get user profile from Firebase or create a new one."""
-    if not firebase_initialized:
-        return None, False
-    try:
-        ref = db.reference(f"users/{user_id}")
-        profile = ref.get()
-        is_new_user = False
-        now_iso = datetime.datetime.now().isoformat()
-        current_auth_status = st.session_state.get("auth_status") == "authenticated"
-        current_email = st.session_state.get("user_email")
-        if profile is None:
-            is_new_user = True
-            profile = {
-                "user_id": user_id,
-                "first_visit": now_iso,
-                "visit_count": 1,
-                "is_authenticated": current_auth_status,
-                "feature_usage_count": 0,
-                "last_visit": now_iso,
-                "email": current_email if current_auth_status else None
-            }
-            ref.set(profile)
-        else:
-            if "session_visit_logged" not in st.session_state:
-                profile["visit_count"] = profile.get("visit_count", 0) + 1
-                profile["last_visit"] = now_iso
-                profile["is_authenticated"] = current_auth_status
-                if current_auth_status:
-                     profile["email"] = current_email
-                else:
-                     profile["email"] = profile.get("email")
-                ref.update({
-                    "visit_count": profile["visit_count"], 
-                    "last_visit": profile["last_visit"],
-                    "is_authenticated": profile["is_authenticated"],
-                    "email": profile.get("email")
-                })
-                st.session_state.session_visit_logged = True
-        return profile, is_new_user
-    except Exception as e:
-        st.warning(f"Firebase error getting/creating user profile for {user_id}: {e}")
-        return None, False
-
-def increment_feature_usage(user_id):
-    """Increment the feature usage count for the user in Firebase."""
-    if not firebase_initialized:
-        return False
-    try:
-        ref = db.reference(f"users/{user_id}/feature_usage_count")
-        current_count = ref.get() or 0
-        ref.set(current_count + 1)
-        if "user_profile" in st.session_state and st.session_state.user_profile:
-            st.session_state.user_profile["feature_usage_count"] = current_count + 1
-        return True
-    except Exception as e:
-        st.warning(f"Firebase error incrementing usage count for {user_id}: {e}")
-        return False
-
-# --- Authentication Check & Google OAuth --- 
-def check_feature_access():
-    """Check if user can access advanced features based on usage count and auth status."""
-    is_authenticated = st.session_state.get("auth_status") == "authenticated"
-    if is_authenticated:
-        return True, "Access granted (Authenticated)."
-    if "user_profile" not in st.session_state or st.session_state.user_profile is None:
-        user_id = get_persistent_user_id()
-        st.session_state.user_profile, _ = get_or_create_user_profile(user_id)
-        if st.session_state.user_profile is None:
-            st.warning("Could not retrieve user profile. Feature access may be limited.")
-            return False, "Cannot verify usage limit. Access denied."
-    usage_count = st.session_state.user_profile.get("feature_usage_count", 0)
-    if usage_count < ADVANCED_FEATURE_LIMIT:
-        return True, f"Access granted (Usage: {usage_count}/{ADVANCED_FEATURE_LIMIT})."
-    else:
-        return False, f"Usage limit ({ADVANCED_FEATURE_LIMIT}) reached. Please log in to continue."
-
-def get_user_info_from_google(token):
-    """Fetch user info using the access token."""
-    if not token or "access_token" not in token:
-        return None
-    try:
-        response = requests.get(
-            "https://www.googleapis.com/oauth2/v1/userinfo",
-            headers={"Authorization": f"Bearer {token['access_token']}"}
-        )
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.RequestException as e:
-        st.error(f"Error fetching user info from Google: {e}")
-        return None
-    except Exception as e:
-         st.error(f"Unexpected error fetching user info: {e}")
-         return None
-
-def show_google_login():
-    """Handles the Google OAuth login flow using streamlit-oauth."""
-    if not google_oauth_configured: # Check if OAuth config loaded successfully
-        st.error("Google Sign-In cannot be enabled due to missing or invalid configuration.")
-        log_visitor_activity("Authentication", action="google_login_fail_config_missing")
-        return
-
-    oauth2 = OAuth2Component(CLIENT_ID, CLIENT_SECRET, AUTHORIZE_ENDPOINT, TOKEN_ENDPOINT, TOKEN_ENDPOINT, REVOKE_ENDPOINT)
-    
-    if "token" not in st.session_state:
-        usage_count = st.session_state.user_profile.get("feature_usage_count", 0) if st.session_state.user_profile else 0
-        if usage_count >= ADVANCED_FEATURE_LIMIT:
-            st.warning(f"Usage limit ({ADVANCED_FEATURE_LIMIT}) reached for advanced features.")
-            st.info("Please log in with Google to continue using AI Report, Forecasting, and AI Chat.")
-            result = oauth2.authorize_button(
-                name="Login with Google",
-                icon="https://www.google.com/favicon.ico",
-                redirect_uri=REDIRECT_URI,
-                scope="openid email profile",
-                key="google_login",
-                extras_params={"prompt": "consent", "access_type": "offline"}
-            )
-            if result:
-                st.session_state.token = result.get("token")
-                user_info = get_user_info_from_google(st.session_state.token)
-                if user_info and user_info.get("email"):
-                    st.session_state.auth_status = "authenticated"
-                    st.session_state.user_email = user_info.get("email")
-                    st.session_state.user_name = user_info.get("name")
-                    st.session_state.persistent_user_id = user_info.get("email")
-                    update_firebase_profile_on_login(user_info.get("email"))
-                    st.success(f"Logged in as {st.session_state.user_name} ({st.session_state.user_email}).")
-                    time.sleep(1.5)
-                    st.rerun()
-                else:
-                    st.error("Login successful, but failed to retrieve user information from Google.")
-                    if "token" in st.session_state: del st.session_state.token 
-                    log_visitor_activity("Authentication", action="google_login_fail_userinfo")
-    else:
-        if not st.session_state.get("user_email"):
-             user_info = get_user_info_from_google(st.session_state.token)
-             if user_info and user_info.get("email"):
-                 st.session_state.auth_status = "authenticated"
-                 st.session_state.user_email = user_info.get("email")
-                 st.session_state.user_name = user_info.get("name")
-                 st.session_state.persistent_user_id = user_info.get("email")
-             else:
-                 st.error("Could not verify login status. Please log in again.")
-                 if "token" in st.session_state: del st.session_state.token
-                 st.session_state.auth_status = "anonymous"
-                 st.session_state.user_email = None
-                 st.session_state.user_name = None
-                 log_visitor_activity("Authentication", action="google_reauth_fail_userinfo")
-                 st.rerun()
-                 
-        if st.session_state.get("user_email"):
-            st.sidebar.success(f"Logged in as: {st.session_state.user_name} ({st.session_state.user_email})")
-            if st.sidebar.button("Logout", key="google_logout"):
-                log_visitor_activity("Authentication", action="google_logout", details={"email": st.session_state.user_email})
-                if "token" in st.session_state: del st.session_state.token
-                st.session_state.auth_status = "anonymous"
-                st.session_state.user_email = None
-                st.session_state.user_name = None
-                st.session_state.persistent_user_id = None
-                st.rerun()
-
-# --- Visitor Analytics Functions --- (No changes needed here)
-def get_session_id():
-    """Create or retrieve a unique session ID."""
-    if "session_id" not in st.session_state:
-        st.session_state.session_id = str(uuid.uuid4())
-    return st.session_state.session_id
-
-def log_visitor_activity(page_name, action="page_view", feature_used=None, details=None):
-    """Log visitor activity to Firebase."""
-    if not firebase_initialized:
-        return
-    try:
-        user_id = get_persistent_user_id()
-        profile, is_new = get_or_create_user_profile(user_id)
-        should_increment = feature_used in ["Forecast", "AI Report", "AI Chat"]
-        access_granted, _ = check_feature_access()
-        action_status = "success"
-        if should_increment:
-            if access_granted:
-                increment_feature_usage(user_id)
-            else:
-                action_status = "denied_limit_reached"
-        full_action_name = f"{action}_{action_status}"
-        ref = db.reference("visitors_log")
-        log_id = str(uuid.uuid4())
-        timestamp = datetime.datetime.now().isoformat()
-        session_id = get_session_id()
-        user_agent = st.session_state.get("user_agent", "Unknown")
-        ip_address = get_client_ip()
-        log_data = {
-            "timestamp": timestamp,
-            "persistent_user_id": user_id,
-            "is_authenticated": st.session_state.get("auth_status") == "authenticated",
-            "visit_count": profile.get("visit_count", 1) if profile else 1,
-            "ip_address": ip_address,
-            "page": page_name,
-            "action": full_action_name,
-            "feature_used": feature_used,
-            "session_id": session_id,
-            "user_agent": user_agent
-        }
-        if details and isinstance(details, dict):
-            log_data["details"] = details
-        ref.child(log_id).set(log_data)
-    except Exception as e:
-        # print(f"Error logging visitor activity: {e}")
-        pass
-
-def fetch_visitor_logs():
-    """Fetch visitor logs from Firebase."""
-    if not firebase_initialized:
-        return pd.DataFrame()
-    try:
-        ref = db.reference("visitors_log")
-        visitors_data = ref.get()
-        if not visitors_data:
-            return pd.DataFrame()
-        visitors_list = []
-        for log_id, data in visitors_data.items():
-            data["log_id"] = log_id
-            if "details" in data and isinstance(data["details"], dict):
-                for k, v in data["details"].items():
-                    data[f"detail_{k}"] = v
-                del data["details"]
-            visitors_list.append(data)
-        df = pd.DataFrame(visitors_list)
-        if "timestamp" in df.columns:
-            df["timestamp"] = pd.to_datetime(df["timestamp"])
-            df = df.sort_values("timestamp", ascending=False)
-        return df
-    except Exception as e:
-        st.error(f"Error fetching visitor logs: {e}")
-        return pd.DataFrame()
-
-def create_visitor_charts(visitor_df):
-    """Create visualizations of visitor data."""
-    if visitor_df.empty:
-        return []
-    figures = []
-    try:
-        df = visitor_df.copy()
-        if "timestamp" not in df.columns:
-             st.warning("Timestamp column missing.")
-             return []
-        df["date"] = df["timestamp"].dt.date
-        if "persistent_user_id" in df.columns:
-            daily_visitors = df.groupby("date")["persistent_user_id"].nunique().reset_index(name="unique_users")
-            daily_visitors["date"] = pd.to_datetime(daily_visitors["date"])
-            fig1 = px.line(daily_visitors, x="date", y="unique_users", title="Daily Unique Visitors")
-            figures.append(fig1)
-        if "action" in df.columns:
-            action_counts = df[~df["action"].str.contains("page_view", case=False, na=False)]["action"].value_counts().reset_index()
-            action_counts.columns = ["action", "count"]
-            fig2 = px.bar(action_counts, x="action", y="count", title="Activity Counts by Action (Excluding Page Views)")
-            figures.append(fig2)
-        if "persistent_user_id" in df.columns and "is_authenticated" in df.columns:
-            latest_status = df.sort_values("timestamp").groupby("persistent_user_id")["is_authenticated"].last().reset_index()
-            auth_counts = latest_status["is_authenticated"].value_counts().reset_index()
-            auth_counts.columns = ["is_authenticated", "count"]
-            auth_counts["status"] = auth_counts["is_authenticated"].map({True: "Authenticated", False: "Anonymous"})
-            fig3 = px.pie(auth_counts, values="count", names="status", title="User Authentication Status (Latest Known)")
-            figures.append(fig3)
+    # --- Gemini Model Setup (moved here) --- 
+    gemini_model_report = None
+    gemini_model_chat = None
+    if gemini_configured:
         try:
-            df["hour"] = df["timestamp"].dt.hour
-            df["weekday"] = df["timestamp"].dt.day_name()
-            hourly_activity = df.groupby(["weekday", "hour"]).size().reset_index(name="count")
-            all_hours = list(range(24))
-            all_weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-            heatmap_data = pd.MultiIndex.from_product([all_weekdays, all_hours], names=["weekday", "hour"]).to_frame(index=False)
-            heatmap_data = pd.merge(heatmap_data, hourly_activity, on=["weekday", "hour"], how="left").fillna(0)
-            heatmap_pivot = heatmap_data.pivot(index="weekday", columns="hour", values="count")
-            heatmap_pivot = heatmap_pivot.reindex(all_weekdays)
-            fig4 = px.imshow(heatmap_pivot, labels=dict(x="Hour", y="Day", color="Count"), x=[str(h) for h in all_hours], y=all_weekdays, title="Activity Heatmap")
-            fig4.update_xaxes(side="bottom")
-            figures.append(fig4)
-        except Exception as e_heatmap:
-            st.warning(f"Could not generate heatmap: {e_heatmap}")
-    except Exception as e_charts:
-        st.error(f"Error creating charts: {e_charts}")
-    return figures
+            generation_config = genai.types.GenerationConfig(temperature=0.7, top_p=0.95, top_k=40, max_output_tokens=4000)
+            gemini_model_report = genai.GenerativeModel(model_name="gemini-pro", generation_config=generation_config)
+            gemini_model_chat = genai.GenerativeModel(model_name="gemini-pro", generation_config=generation_config)
+        except Exception as e:
+            st.warning(f"Failed to initialize Gemini models: {e}")
+            gemini_configured = False # Mark as not configured if models fail
 
-# --- PDF Generation (No changes needed here) ---
-class PDF(FPDF):
-    def header(self):
-        self.set_font("Arial", "B", 12)
-        self.cell(0, 10, "DeepHydro AI Forecasting Report", 0, 1, "C")
-        self.ln(5)
-    def chapter_title(self, title):
-        self.set_font("Arial", "B", 12)
-        self.cell(0, 10, title, 0, 1, "L")
-        self.ln(4)
-    def chapter_body(self, body):
-        self.set_font("Arial", "", 10)
-        self.multi_cell(0, 5, body)
-        self.ln()
-    def add_plot(self, plot_bytes, title):
-        self.chapter_title(title)
-        try:
-            temp_img_path = "temp_plot.png"
-            with open(temp_img_path, "wb") as f: f.write(plot_bytes)
-            self.image(temp_img_path, x=10, w=self.w - 20)
-            os.remove(temp_img_path)
-            self.ln(5)
-        except Exception as e: self.chapter_body(f"[Error adding plot: {e}]")
-    def footer(self):
-        self.set_y(-15)
-        self.set_font("Arial", "I", 8)
-        self.cell(0, 10, f"Page {self.page_no()}", 0, 0, "C")
+    # --- Custom CSS (No changes needed here) ---
+    def apply_custom_css():
+        st.markdown("""
+        <style>
+        .stApp { background-color: #f0f2f6; }
+        .stTabs [data-baseweb="tab-list"] { gap: 24px; }
+        .stTabs [data-baseweb="tab"] { height: 50px; white-space: pre-wrap; background-color: #FFFFFF; border-radius: 4px 4px 0px 0px; gap: 1px; padding: 10px 15px; transition: background-color 0.3s ease; }
+        .stTabs [aria-selected="true"] { background-color: #e6f7ff; }
+        .stTabs [data-baseweb="tab"]:hover { background-color: #f0f0f0; }
+        [data-testid="stSidebar"] { background-color: #ffffff; padding: 1rem; }
+        [data-testid="stSidebar"] h2 { color: #1890ff; }
+        [data-testid="stSidebar"] .stButton>button { width: 100%; border-radius: 5px; background-color: #1890ff; color: white; transition: background-color 0.3s ease; }
+        [data-testid="stSidebar"] .stButton>button:hover { background-color: #40a9ff; }
+        [data-testid="stSidebar"] .stDownloadButton>button { width: 100%; border-radius: 5px; background-color: #52c41a; color: white; transition: background-color 0.3s ease; }
+        [data-testid="stSidebar"] .stDownloadButton>button:hover { background-color: #73d13d; }
+        .chat-message { padding: 0.8rem 1rem; margin-bottom: 0.8rem; border-radius: 8px; position: relative; word-wrap: break-word; }
+        .user-message { background-color: #e6f7ff; border-left: 4px solid #1890ff; text-align: left; }
+        .ai-message { background-color: #f0f0f0; border-left: 4px solid #8c8c8c; text-align: left; }
+        .copy-tooltip { position: absolute; top: 0.5rem; right: 0.5rem; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.8rem; display: none; background-color: #555; color: white; }
+        .chat-message:active .copy-tooltip { display: block; }
+        .stTabs [data-baseweb="tab-list"] { gap: 2px; }
+        .stTabs [data-baseweb="tab"] { padding: 0.5rem 1rem; border-radius: 4px 4px 0 0; }
+        [data-testid="stMetricValue"] { font-weight: 600; }
+        .about-us-header { cursor: pointer; padding: 0.5rem; border-radius: 4px; margin-top: 1rem; font-weight: 500; }
+        .about-us-content { padding: 0.8rem; border-radius: 4px; margin-top: 0.5rem; font-size: 0.9rem; }
+        .app-intro { padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem; border-left: 4px solid #1E88E5; }
+        </style>
+        """, unsafe_allow_html=True)
 
-def create_pdf_report(forecast_fig, loss_fig, metrics, ai_report_text):
-    pdf = PDF()
-    pdf.add_page()
-    if forecast_fig: pdf.add_plot(forecast_fig.to_image(format="png", scale=2), "Forecast Visualization")
-    else: pdf.chapter_body("[Forecast plot not available]")
-    if loss_fig: pdf.add_plot(loss_fig.to_image(format="png", scale=2), "Model Training Loss")
-    else: pdf.chapter_body("[Training loss plot not available]")
-    pdf.chapter_title("Performance Metrics")
-    if metrics: pdf.chapter_body("\n".join([f"{k}: {v:.4f}" if isinstance(v, float) else f"{k}: {v}" for k, v in metrics.items()]))
-    else: pdf.chapter_body("[Metrics not available]")
-    pdf.chapter_title("AI Generated Analysis")
-    if ai_report_text: pdf.chapter_body(ai_report_text)
-    else: pdf.chapter_body("[AI analysis not available]")
-    try: return pdf.output(dest="S").encode("latin-1")
-    except Exception as e: st.error(f"Error generating PDF bytes: {e}"); return None
+    # --- JavaScript (No changes needed here) ---
+    def add_javascript_functionality():
+        st.markdown("""
+        <script>
+        function copyToClipboard(text) { const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); }
+        document.addEventListener('DOMContentLoaded', function() {
+            setTimeout(function() {
+                const chatMessages = document.querySelectorAll('.chat-message');
+                chatMessages.forEach(function(msg) {
+                    if (!msg.querySelector('.copy-tooltip')) { const tt = document.createElement('span'); tt.className = 'copy-tooltip'; tt.textContent = 'Copied!'; msg.appendChild(tt); }
+                    let timer;
+                    msg.addEventListener('touchstart', function(e) { timer = setTimeout(() => { const txt = this.innerText.replace('Copied!', '').trim(); copyToClipboard(txt); const tt = this.querySelector('.copy-tooltip'); if (tt) { tt.style.display = 'block'; setTimeout(() => { tt.style.display = 'none'; }, 1500); } }, 500); });
+                    msg.addEventListener('touchend', function() { clearTimeout(timer); });
+                    msg.addEventListener('touchmove', function() { clearTimeout(timer); });
+                    msg.addEventListener('click', function(e) { const txt = this.innerText.replace('Copied!', '').trim(); copyToClipboard(txt); const tt = this.querySelector('.copy-tooltip'); if (tt) { tt.style.display = 'block'; setTimeout(() => { tt.style.display = 'none'; }, 1500); } });
+                });
+                const aboutH = document.querySelector('.about-us-header'); const aboutC = document.querySelector('.about-us-content');
+                if (aboutH && aboutC) { if (!aboutC.classList.contains('initialized')) { aboutC.style.display = 'none'; aboutC.classList.add('initialized'); } aboutH.addEventListener('click', function() { aboutC.style.display = (aboutC.style.display === 'none' ? 'block' : 'none'); }); }
+            }, 1000);
+        });
+        </script>
+        """, unsafe_allow_html=True)
 
-# --- Custom CSS (No changes needed here) ---
-def apply_custom_css():
-    st.markdown("""
-    <style>
-    .stApp { background-color: #f0f2f6; }
-    .stTabs [data-baseweb="tab-list"] { gap: 24px; }
-    .stTabs [data-baseweb="tab"] { height: 50px; white-space: pre-wrap; background-color: #FFFFFF; border-radius: 4px 4px 0px 0px; gap: 1px; padding: 10px 15px; transition: background-color 0.3s ease; }
-    .stTabs [aria-selected="true"] { background-color: #e6f7ff; }
-    .stTabs [data-baseweb="tab"]:hover { background-color: #f0f0f0; }
-    [data-testid="stSidebar"] { background-color: #ffffff; padding: 1rem; }
-    [data-testid="stSidebar"] h2 { color: #1890ff; }
-    [data-testid="stSidebar"] .stButton>button { width: 100%; border-radius: 5px; background-color: #1890ff; color: white; transition: background-color 0.3s ease; }
-    [data-testid="stSidebar"] .stButton>button:hover { background-color: #40a9ff; }
-    [data-testid="stSidebar"] .stDownloadButton>button { width: 100%; border-radius: 5px; background-color: #52c41a; color: white; transition: background-color 0.3s ease; }
-    [data-testid="stSidebar"] .stDownloadButton>button:hover { background-color: #73d13d; }
-    .chat-message { padding: 0.8rem 1rem; margin-bottom: 0.8rem; border-radius: 8px; position: relative; word-wrap: break-word; }
-    .user-message { background-color: #e6f7ff; border-left: 4px solid #1890ff; text-align: left; }
-    .ai-message { background-color: #f0f0f0; border-left: 4px solid #8c8c8c; text-align: left; }
-    .copy-tooltip { position: absolute; top: 0.5rem; right: 0.5rem; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.8rem; display: none; background-color: #555; color: white; }
-    .chat-message:active .copy-tooltip { display: block; }
-    .stTabs [data-baseweb="tab-list"] { gap: 2px; }
-    .stTabs [data-baseweb="tab"] { padding: 0.5rem 1rem; border-radius: 4px 4px 0 0; }
-    [data-testid="stMetricValue"] { font-weight: 600; }
-    .about-us-header { cursor: pointer; padding: 0.5rem; border-radius: 4px; margin-top: 1rem; font-weight: 500; }
-    .about-us-content { padding: 0.8rem; border-radius: 4px; margin-top: 0.5rem; font-size: 0.9rem; }
-    .app-intro { padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem; border-left: 4px solid #1E88E5; }
-    </style>
-    """, unsafe_allow_html=True)
-
-# --- JavaScript (No changes needed here) ---
-def add_javascript_functionality():
-    st.markdown("""
-    <script>
-    function copyToClipboard(text) { const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); }
-    document.addEventListener('DOMContentLoaded', function() {
-        setTimeout(function() {
-            const chatMessages = document.querySelectorAll('.chat-message');
-            chatMessages.forEach(function(msg) {
-                if (!msg.querySelector('.copy-tooltip')) { const tt = document.createElement('span'); tt.className = 'copy-tooltip'; tt.textContent = 'Copied!'; msg.appendChild(tt); }
-                let timer;
-                msg.addEventListener('touchstart', function(e) { timer = setTimeout(() => { const txt = this.innerText.replace('Copied!', '').trim(); copyToClipboard(txt); const tt = this.querySelector('.copy-tooltip'); if (tt) { tt.style.display = 'block'; setTimeout(() => { tt.style.display = 'none'; }, 1500); } }, 500); });
-                msg.addEventListener('touchend', function() { clearTimeout(timer); });
-                msg.addEventListener('touchmove', function() { clearTimeout(timer); });
-                msg.addEventListener('click', function(e) { const txt = this.innerText.replace('Copied!', '').trim(); copyToClipboard(txt); const tt = this.querySelector('.copy-tooltip'); if (tt) { tt.style.display = 'block'; setTimeout(() => { tt.style.display = 'none'; }, 1500); } });
-            });
-            const aboutH = document.querySelector('.about-us-header'); const aboutC = document.querySelector('.about-us-content');
-            if (aboutH && aboutC) { if (!aboutC.classList.contains('initialized')) { aboutC.style.display = 'none'; aboutC.classList.add('initialized'); } aboutH.addEventListener('click', function() { aboutC.style.display = (aboutC.style.display === 'none' ? 'block' : 'none'); }); }
-        }, 1000);
-    });
-    </script>
-    """, unsafe_allow_html=True)
-
-# --- Page Configuration & Initialization --- 
-st.set_page_config(page_title="DeepHydro AI Forecasting", layout="wide")
-
-# Only proceed if config loaded successfully
-if config_loaded:
+    # --- Apply CSS & JS --- 
     apply_custom_css()
     add_javascript_functionality()
 
@@ -667,14 +268,280 @@ if config_loaded:
                  STANDARD_MODEL_SEQUENCE_LENGTH = st.session_state.standard_model_seq_len
         except Exception as e:
             st.warning(f"Could not load standard model {STANDARD_MODEL_PATH}: {e}. Using default seq len {STANDARD_MODEL_SEQUENCE_LENGTH}.")
-            log_visitor_activity("Model Handling", action="load_standard_model_fail", details={"path": STANDARD_MODEL_PATH, "error": str(e)})
+            # log_visitor_activity("Model Handling", action="load_standard_model_fail", details={"path": STANDARD_MODEL_PATH, "error": str(e)}) # Logging moved
     else:
         st.warning(f"Standard model file not found: {STANDARD_MODEL_PATH}. Standard model option disabled.")
         # Disable standard model if file not found
         if st.session_state.selected_model_type == "Standard":
              st.session_state.selected_model_type = "Train New" # Default to train new
 
-    # Initialize user profile after standard model load (needs session state)
+    # --- User Identification & Tracking (No changes needed here) ---
+    def get_client_ip():
+        """Get the client's IP address if available."""
+        try:
+            response = requests.get("https://httpbin.org/ip", timeout=3)
+            response.raise_for_status()
+            return response.json().get("origin", "Unknown")
+        except requests.exceptions.RequestException:
+            return "Unknown"
+        except Exception:
+            return "Unknown"
+
+    def get_persistent_user_id():
+        """Generate or retrieve a persistent user ID."""
+        if st.session_state.get("auth_status") == "authenticated" and st.session_state.get("user_email"):
+            user_id = st.session_state.user_email
+            if st.session_state.get("persistent_user_id") != user_id:
+                 st.session_state.persistent_user_id = user_id
+            return user_id
+        if "persistent_user_id" in st.session_state and st.session_state.persistent_user_id:
+            return st.session_state.persistent_user_id
+        ip_address = get_client_ip()
+        user_agent = st.session_state.get("user_agent", "Unknown")
+        hash_input = f"{ip_address}-{user_agent}"
+        hashed_id = hashlib.sha256(hash_input.encode()).hexdigest()
+        persistent_id = f"anon_{hashed_id}"
+        st.session_state.persistent_user_id = persistent_id
+        return persistent_id
+
+    # --- Visitor Analytics Functions --- (No changes needed here)
+    def get_session_id():
+        """Create or retrieve a unique session ID."""
+        if "session_id" not in st.session_state:
+            st.session_state.session_id = str(uuid.uuid4())
+        return st.session_state.session_id
+
+    def log_visitor_activity(page_name, action="page_view", feature_used=None, details=None):
+        """Log visitor activity to Firebase."""
+        if not firebase_initialized:
+            return
+        try:
+            user_id = get_persistent_user_id()
+            profile, is_new = get_or_create_user_profile(user_id)
+            should_increment = feature_used in ["Forecast", "AI Report", "AI Chat"]
+            access_granted, _ = check_feature_access()
+            action_status = "success"
+            if should_increment:
+                if access_granted:
+                    increment_feature_usage(user_id)
+                else:
+                    action_status = "denied_limit_reached"
+            full_action_name = f"{action}_{action_status}"
+            ref = db.reference("visitors_log")
+            log_id = str(uuid.uuid4())
+            timestamp = datetime.datetime.now().isoformat()
+            session_id = get_session_id()
+            user_agent = st.session_state.get("user_agent", "Unknown")
+            ip_address = get_client_ip()
+            log_data = {
+                "timestamp": timestamp,
+                "persistent_user_id": user_id,
+                "is_authenticated": st.session_state.get("auth_status") == "authenticated",
+                "visit_count": profile.get("visit_count", 1) if profile else 1,
+                "ip_address": ip_address,
+                "page": page_name,
+                "action": full_action_name,
+                "feature_used": feature_used,
+                "session_id": session_id,
+                "user_agent": user_agent
+            }
+            if details and isinstance(details, dict):
+                log_data["details"] = details
+            ref.child(log_id).set(log_data)
+        except Exception as e:
+            # print(f"Error logging visitor activity: {e}")
+            pass
+
+    def update_firebase_profile_on_login(email):
+        """Update Firebase profile when a user logs in via Google OAuth."""
+        if not firebase_initialized or not email:
+            return
+        try:
+            ref = db.reference(f"users/{email}")
+            profile = ref.get()
+            now_iso = datetime.datetime.now().isoformat()
+            update_data = {
+                "is_authenticated": True,
+                "last_login_google": now_iso,
+                "user_id": email
+            }
+            if profile is None:
+                update_data["first_visit"] = now_iso
+                update_data["visit_count"] = 1
+                update_data["feature_usage_count"] = 0
+                update_data["last_visit"] = now_iso
+                ref.set(update_data)
+                st.session_state.user_profile = update_data
+            else:
+                ref.update(update_data)
+                st.session_state.user_profile = ref.get()
+            log_visitor_activity("Authentication", action="google_login_success", details={"email": email})
+        except Exception as e:
+            # st.error(f"Firebase error updating profile after Google login for {email}: {e}") # Error shown globally
+            log_visitor_activity("Authentication", action="google_login_firebase_update_fail", details={"email": email, "error": str(e)})
+
+    def get_or_create_user_profile(user_id):
+        """Get user profile from Firebase or create a new one."""
+        if not firebase_initialized:
+            return None, False
+        try:
+            ref = db.reference(f"users/{user_id}")
+            profile = ref.get()
+            is_new_user = False
+            now_iso = datetime.datetime.now().isoformat()
+            current_auth_status = st.session_state.get("auth_status") == "authenticated"
+            current_email = st.session_state.get("user_email")
+            if profile is None:
+                is_new_user = True
+                profile = {
+                    "user_id": user_id,
+                    "first_visit": now_iso,
+                    "visit_count": 1,
+                    "is_authenticated": current_auth_status,
+                    "feature_usage_count": 0,
+                    "last_visit": now_iso,
+                    "email": current_email if current_auth_status else None
+                }
+                ref.set(profile)
+            else:
+                if "session_visit_logged" not in st.session_state:
+                    profile["visit_count"] = profile.get("visit_count", 0) + 1
+                    profile["last_visit"] = now_iso
+                    profile["is_authenticated"] = current_auth_status
+                    if current_auth_status:
+                         profile["email"] = current_email
+                    else:
+                         profile["email"] = profile.get("email")
+                    ref.update({
+                        "visit_count": profile["visit_count"], 
+                        "last_visit": profile["last_visit"],
+                        "is_authenticated": profile["is_authenticated"],
+                        "email": profile.get("email")
+                    })
+                    st.session_state.session_visit_logged = True
+            return profile, is_new_user
+        except Exception as e:
+            # st.warning(f"Firebase error getting/creating user profile for {user_id}: {e}") # Warning shown globally
+            return None, False
+
+    def increment_feature_usage(user_id):
+        """Increment the feature usage count for the user in Firebase."""
+        if not firebase_initialized:
+            return False
+        try:
+            ref = db.reference(f"users/{user_id}/feature_usage_count")
+            current_count = ref.get() or 0
+            ref.set(current_count + 1)
+            if "user_profile" in st.session_state and st.session_state.user_profile:
+                st.session_state.user_profile["feature_usage_count"] = current_count + 1
+            return True
+        except Exception as e:
+            # st.warning(f"Firebase error incrementing usage count for {user_id}: {e}") # Warning shown globally
+            return False
+
+    # --- Authentication Check & Google OAuth --- 
+    def check_feature_access():
+        """Check if user can access advanced features based on usage count and auth status."""
+        is_authenticated = st.session_state.get("auth_status") == "authenticated"
+        if is_authenticated:
+            return True, "Access granted (Authenticated)."
+        if "user_profile" not in st.session_state or st.session_state.user_profile is None:
+            user_id = get_persistent_user_id()
+            st.session_state.user_profile, _ = get_or_create_user_profile(user_id)
+            if st.session_state.user_profile is None:
+                # st.warning("Could not retrieve user profile. Feature access may be limited.") # Warning shown globally
+                return False, "Cannot verify usage limit. Access denied."
+        usage_count = st.session_state.user_profile.get("feature_usage_count", 0)
+        if usage_count < ADVANCED_FEATURE_LIMIT:
+            return True, f"Access granted (Usage: {usage_count}/{ADVANCED_FEATURE_LIMIT})."
+        else:
+            return False, f"Usage limit ({ADVANCED_FEATURE_LIMIT}) reached. Please log in to continue."
+
+    def get_user_info_from_google(token):
+        """Fetch user info using the access token."""
+        if not token or "access_token" not in token:
+            return None
+        try:
+            response = requests.get(
+                "https://www.googleapis.com/oauth2/v1/userinfo",
+                headers={"Authorization": f"Bearer {token['access_token']}"}
+            )
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            st.error(f"Error fetching user info from Google: {e}") # Show error here
+            return None
+        except Exception as e:
+             st.error(f"Unexpected error fetching user info: {e}") # Show error here
+             return None
+
+    def show_google_login():
+        """Handles the Google OAuth login flow using streamlit-oauth."""
+        if not google_oauth_configured: # Check if OAuth config loaded successfully
+            st.sidebar.error("Google Sign-In not configured.")
+            log_visitor_activity("Authentication", action="google_login_fail_config_missing")
+            return
+
+        oauth2 = OAuth2Component(CLIENT_ID, CLIENT_SECRET, AUTHORIZE_ENDPOINT, TOKEN_ENDPOINT, TOKEN_ENDPOINT, REVOKE_ENDPOINT)
+        
+        if "token" not in st.session_state:
+            usage_count = st.session_state.user_profile.get("feature_usage_count", 0) if st.session_state.user_profile else 0
+            if usage_count >= ADVANCED_FEATURE_LIMIT:
+                st.sidebar.warning(f"Usage limit reached.")
+                st.sidebar.info("Log in with Google to continue.")
+                result = oauth2.authorize_button(
+                    name="Login with Google",
+                    icon="https://www.google.com/favicon.ico",
+                    redirect_uri=REDIRECT_URI,
+                    scope="openid email profile",
+                    key="google_login",
+                    extras_params={"prompt": "consent", "access_type": "offline"}
+                )
+                if result:
+                    st.session_state.token = result.get("token")
+                    user_info = get_user_info_from_google(st.session_state.token)
+                    if user_info and user_info.get("email"):
+                        st.session_state.auth_status = "authenticated"
+                        st.session_state.user_email = user_info.get("email")
+                        st.session_state.user_name = user_info.get("name")
+                        st.session_state.persistent_user_id = user_info.get("email")
+                        update_firebase_profile_on_login(user_info.get("email"))
+                        st.success(f"Logged in as {st.session_state.user_name} ({st.session_state.user_email}).")
+                        time.sleep(1.5)
+                        st.rerun()
+                    else:
+                        st.error("Login successful, but failed to retrieve user information from Google.")
+                        if "token" in st.session_state: del st.session_state.token 
+                        log_visitor_activity("Authentication", action="google_login_fail_userinfo")
+        else:
+            if not st.session_state.get("user_email"):
+                 user_info = get_user_info_from_google(st.session_state.token)
+                 if user_info and user_info.get("email"):
+                     st.session_state.auth_status = "authenticated"
+                     st.session_state.user_email = user_info.get("email")
+                     st.session_state.user_name = user_info.get("name")
+                     st.session_state.persistent_user_id = user_info.get("email")
+                 else:
+                     st.error("Could not verify login status. Please log in again.")
+                     if "token" in st.session_state: del st.session_state.token
+                     st.session_state.auth_status = "anonymous"
+                     st.session_state.user_email = None
+                     st.session_state.user_name = None
+                     log_visitor_activity("Authentication", action="google_reauth_fail_userinfo")
+                     st.rerun()
+                     
+            if st.session_state.get("user_email"):
+                st.sidebar.success(f"Logged in as: {st.session_state.user_name} ({st.session_state.user_email})")
+                if st.sidebar.button("Logout", key="google_logout"):
+                    log_visitor_activity("Authentication", action="google_logout", details={"email": st.session_state.user_email})
+                    if "token" in st.session_state: del st.session_state.token
+                    st.session_state.auth_status = "anonymous"
+                    st.session_state.user_email = None
+                    st.session_state.user_name = None
+                    st.session_state.persistent_user_id = None
+                    st.rerun()
+
+    # --- Initialize user profile (needs session state) ---
     if "user_profile" not in st.session_state or st.session_state.user_profile is None:
         if firebase_initialized:
             user_id = get_persistent_user_id()
@@ -803,7 +670,7 @@ if config_loaded:
 
     # --- AI Report Generation --- 
     def generate_ai_report(data_summary, forecast_summary, metrics, model_details):
-        if not gemini_configured: return "AI report disabled."
+        if not gemini_configured or gemini_model_report is None: return "AI report disabled or model not initialized."
         try:
             prompt = f"""Generate concise scientific report: Groundwater Level Forecast.
             Data: {data_summary}
@@ -819,9 +686,14 @@ if config_loaded:
 
     # --- AI Chat Functionality --- 
     def initialize_chat():
-        if not gemini_configured: return
+        if not gemini_configured or gemini_model_chat is None: return
         if "messages" not in st.session_state: st.session_state.messages = []
-        if "chat_model" not in st.session_state: st.session_state.chat_model = gemini_model_chat.start_chat(history=[])
+        if "chat_model" not in st.session_state or st.session_state.chat_model is None:
+             try:
+                 st.session_state.chat_model = gemini_model_chat.start_chat(history=[])
+             except Exception as e:
+                 st.warning(f"Failed to start chat model: {e}")
+                 st.session_state.chat_model = None
 
     def display_chat_history():
         for msg in st.session_state.messages:
@@ -829,7 +701,7 @@ if config_loaded:
             st.markdown(f'<div class="chat-message {role_cls}">{msg["content"]}<span class="copy-tooltip">Copied!</span></div>', unsafe_allow_html=True)
 
     def handle_chat_input(prompt):
-        if not gemini_configured: st.error("Chat disabled."); return
+        if not gemini_configured or st.session_state.get("chat_model") is None: st.error("Chat disabled or model not initialized."); return
         if not prompt: return
         log_visitor_activity("AI Chat", action="send_chat_message")
         st.session_state.messages.append({"role": "user", "content": prompt})
@@ -844,6 +716,50 @@ if config_loaded:
             st.session_state.messages.append({"role": "model", "content": err_msg})
             st.error(err_msg)
             log_visitor_activity("AI Chat", action="chat_error", details={"error": str(e)})
+
+    # --- PDF Generation (No changes needed here) ---
+    class PDF(FPDF):
+        def header(self):
+            self.set_font("Arial", "B", 12)
+            self.cell(0, 10, "DeepHydro AI Forecasting Report", 0, 1, "C")
+            self.ln(5)
+        def chapter_title(self, title):
+            self.set_font("Arial", "B", 12)
+            self.cell(0, 10, title, 0, 1, "L")
+            self.ln(4)
+        def chapter_body(self, body):
+            self.set_font("Arial", "", 10)
+            self.multi_cell(0, 5, body)
+            self.ln()
+        def add_plot(self, plot_bytes, title):
+            self.chapter_title(title)
+            try:
+                temp_img_path = "temp_plot.png"
+                with open(temp_img_path, "wb") as f: f.write(plot_bytes)
+                self.image(temp_img_path, x=10, w=self.w - 20)
+                os.remove(temp_img_path)
+                self.ln(5)
+            except Exception as e: self.chapter_body(f"[Error adding plot: {e}]")
+        def footer(self):
+            self.set_y(-15)
+            self.set_font("Arial", "I", 8)
+            self.cell(0, 10, f"Page {self.page_no()}", 0, 0, "C")
+
+    def create_pdf_report(forecast_fig, loss_fig, metrics, ai_report_text):
+        pdf = PDF()
+        pdf.add_page()
+        if forecast_fig: pdf.add_plot(forecast_fig.to_image(format="png", scale=2), "Forecast Visualization")
+        else: pdf.chapter_body("[Forecast plot not available]")
+        if loss_fig: pdf.add_plot(loss_fig.to_image(format="png", scale=2), "Model Training Loss")
+        else: pdf.chapter_body("[Training loss plot not available]")
+        pdf.chapter_title("Performance Metrics")
+        if metrics: pdf.chapter_body("\n".join([f"{k}: {v:.4f}" if isinstance(v, float) else f"{k}: {v}" for k, v in metrics.items()]))
+        else: pdf.chapter_body("[Metrics not available]")
+        pdf.chapter_title("AI Generated Analysis")
+        if ai_report_text: pdf.chapter_body(ai_report_text)
+        else: pdf.chapter_body("[AI analysis not available]")
+        try: return pdf.output(dest="S").encode("latin-1")
+        except Exception as e: st.error(f"Error generating PDF bytes: {e}"); return None
 
     # --- Streamlit App UI --- 
     st.sidebar.image("logo.png", width=100)
@@ -963,9 +879,17 @@ if config_loaded:
             if st.session_state.forecast_df is not None:
                 context = f"Chat Context: Forecast generated. Hist data: {st.session_state.df['Date'].min().date()} to {st.session_state.df['Date'].max().date()}. Forecast: {forecast_horizon} steps, range {st.session_state.forecast_df['Forecast'].min():.2f} to {st.session_state.forecast_df['Forecast'].max():.2f}. Ask questions."
                 st.session_state.messages = []
-                st.session_state.chat_model = gemini_model_chat.start_chat(history=[])
-                st.session_state.messages.append({"role": "model", "content": context})
-                st.success("Chat activated with context!")
+                # Re-initialize chat model if needed
+                if st.session_state.chat_model is None and gemini_configured:
+                    try:
+                        st.session_state.chat_model = gemini_model_chat.start_chat(history=[])
+                    except Exception as e:
+                        st.warning(f"Failed to re-initialize chat model: {e}")
+                if st.session_state.chat_model:
+                    st.session_state.messages.append({"role": "model", "content": context})
+                    st.success("Chat activated with context!")
+                else:
+                    st.warning("Chat activated, but model failed to initialize.")
             else: st.warning("Chat activated, no forecast context.")
             st.rerun()
         else: st.sidebar.info("Chat already active.")
@@ -1040,14 +964,14 @@ if config_loaded:
     with tabs[3]: # AI Report
         log_visitor_activity("Tab: AI Report", "page_view")
         st.header("AI-Generated Scientific Report")
-        if not gemini_configured: st.warning("AI disabled.")
+        if not gemini_configured: st.warning("AI report disabled (Gemini not configured).")
         elif st.session_state.ai_report: st.markdown(f'<div class="chat-message ai-message">{st.session_state.ai_report}<span class="copy-tooltip">Copied!</span></div>', unsafe_allow_html=True)
         else: st.info("Generate report from sidebar after forecast.")
 
     with tabs[4]: # AI Chatbot
         log_visitor_activity("Tab: AI Chatbot", "page_view")
         st.header("AI Chatbot")
-        if not gemini_configured: st.warning("AI disabled.")
+        if not gemini_configured: st.warning("AI chat disabled (Gemini not configured).")
         elif st.session_state.chat_active: display_chat_history(); user_prompt = st.chat_input("Ask about forecast..."); handle_chat_input(user_prompt)
         elif st.session_state.forecast_df is None: st.info("Run forecast, then activate chat.")
         else: st.info("Activate chat from sidebar.")
@@ -1087,10 +1011,6 @@ if config_loaded:
     **Config Note:** This version reads config from the `APP_CONFIG_JSON` environment variable. Ensure it's set securely in your deployment (e.g., Render.com Secret File) with the correct JSON structure including Firebase, Google OAuth, Gemini API key, and admin password.
     </div>
     """, unsafe_allow_html=True)
-
-else: # config_loaded is False
-    st.title("Application Configuration Error")
-    st.error("The application could not start because the configuration is missing or invalid. Please ensure the `APP_CONFIG_JSON` environment variable is set correctly and contains valid JSON with all required keys.")
 
 # --- (End of Script) --- 
 
