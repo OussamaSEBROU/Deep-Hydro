@@ -738,7 +738,7 @@ def create_pdf_report(forecast_fig, loss_fig, metrics, ai_report_text):
     except Exception as e: st.error(f"Error generating PDF bytes: {e}"); return None
 
 # --- Streamlit App UI --- 
-st.sidebar.image("logo.png", width=100)
+#st.sidebar.image("logo.png", width=100)
 st.sidebar.title("DeepHydro AI")
 st.sidebar.markdown("--- User Access ---")
 show_google_login() # Use the actual Google Login function
