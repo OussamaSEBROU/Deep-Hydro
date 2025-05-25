@@ -281,7 +281,7 @@ REVOKE_ENDPOINT = "https://oauth2.googleapis.com/revoke"
 def get_user_info_from_google(token):
     if not token or "access_token" not in token: return None
     try:
-        response = requests.get("https://www.googleapis.com/oauth2/v1/userinfo", headers={"Authorization": f"Bearer {token["access_token"]}"})
+        response = requests.get("https://www.googleapis.com/oauth2/v1/userinfo", headers={"Authorization": f"Bearer {token['access_token']}"})
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
@@ -404,7 +404,7 @@ def fetch_visitor_logs():
                 data["log_id"] = log_id
                 if "details" in data and isinstance(data["details"], dict):
                     for k, v in data["details"].items():
-                        safe_key = f"detail_{str(k).replace(".", "_").replace("$", "_")}"
+                        safe_key = f"detail_{str(k).replace('.', '_').replace('$', '_')}"
                         data[safe_key] = v
                     del data["details"]
                 visitors_list.append(data)
