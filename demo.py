@@ -594,7 +594,7 @@ def add_javascript_functionality():
      st.markdown("""<script>...</script>""", unsafe_allow_html=True) # Keep existing JS
 
 # --- Page Configuration & Initialization --- 
-st.set_page_config(page_title="DeepHydro AI Forecasting", layout="wide")
+#st.set_page_config(page_title="DeepHydro AI Forecasting", layout="wide")
 apply_custom_css() # Apply CSS (assuming it's defined above or unchanged)
 add_javascript_functionality() # Add JS (assuming it's defined above or unchanged)
 
@@ -906,7 +906,7 @@ def handle_chat_input(prompt):
 # --- Streamlit App UI --- 
 
 # --- Sidebar --- 
-st.sidebar.image("logo.png", width=100) # Assuming logo.png exists
+#st.sidebar.image("logo.png", width=100) # Assuming logo.png exists
 st.sidebar.title("DeepHydro AI")
 
 # --- Authentication Section (Sidebar) ---
