@@ -75,17 +75,17 @@ def load_configuration():
         
         # Validate essential config sections
         if "firebase_service_account" not in APP_CONFIG:
-            logging.warning("Firebase configuration (\"firebase_service_account\") missing.")
+            logging.warning("Firebase configuration ('firebase_service_account') missing.")
         if "google_oauth" not in APP_CONFIG or not all(k in APP_CONFIG["google_oauth"] for k in ["client_id", "client_secret", "redirect_uri"]):
-            logging.warning("Google OAuth configuration (\"google_oauth\") incomplete or missing.")
+            logging.warning("Google OAuth configuration ('google_oauth') incomplete or missing.")
             google_oauth_configured = False
         else:
             google_oauth_configured = True
             logging.info("Google OAuth config found.")
         if "google_api_key" not in APP_CONFIG:
-            logging.warning("Google API Key (\"google_api_key\") missing.")
+            logging.warning("Google API Key ('google_api_key') missing.")
         if "admin_password" not in APP_CONFIG:
-             logging.warning("Admin Password (\"admin_password\") missing.")
+             logging.warning("Admin Password ('admin_password') missing.")
              admin_password_configured = False
         else:
             admin_password_configured = True
@@ -126,7 +126,7 @@ def initialize_firebase_cached(_config):
                 firebase_url = f"https://{project_id}-default-rtdb.firebaseio.com/"
                 logging.info(f"Firebase Database URL not set, using default: {firebase_url}")
             else:
-                logging.error("Cannot determine Firebase DB URL: \"firebase_database_url\" missing and \"project_id\" missing.")
+                logging.error("Cannot determine Firebase DB URL: 'firebase_database_url' missing and 'project_id' missing.")
                 return False
 
         firebase_admin.initialize_app(cred, {"databaseURL": firebase_url})
@@ -157,7 +157,7 @@ def configure_gemini_cached(_config):
             logging.error(f"Error configuring Gemini API: {e}. AI features might be limited.")
             return False
     else:
-        logging.warning("Gemini API Key (\"google_api_key\") not found or is placeholder. AI features disabled.")
+        logging.warning("Gemini API Key ('google_api_key') not found or is placeholder. AI features disabled.")
         return False
 
 @st.cache_resource
@@ -552,11 +552,11 @@ def create_visitor_charts(visitor_df):
         try:
             df["hour"] = df["timestamp"].dt.hour
             df["day_of_week"] = df["timestamp"].dt.day_name()
-            day_order = [\"Monday\", \"Tuesday\", \"Wednesday\", \"Thursday\", \"Friday\", \"Saturday\", \"Sunday\"]
-            hourly_activity = df.groupby([\"day_of_week\", \"hour\"]).size().reset_index(name=\"count\")
+            day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+            hourly_activity = df.groupby(['day_of_week', 'hour']).size().reset_index(name='count')
             
             if len(hourly_activity) > 0:
-                hourly_pivot = hourly_activity.pivot_table(values=\"count\", index=\"day_of_week\", columns=\"hour\", fill_value=0)
+                hourly_pivot = hourly_activity.pivot_table(values='count', index='day_of_week', columns='hour', fill_value=0)
                 available_days = set(hourly_pivot.index) & set(day_order)
                 ordered_available_days = [day for day in day_order if day in available_days]
                 hourly_pivot = hourly_pivot.reindex(ordered_available_days)
@@ -640,7 +640,7 @@ def render_admin_analytics():
             st.subheader("Raw Visitor Data")
             # (Filtering and display logic kept as is)
             col1_filter, col2_filter = st.columns(2)
-            date_range = None; user_id_filter = \"All\"
+            date_range = None; user_id_filter = \"All'
             try:
                 if "timestamp" in visitor_df and not visitor_df["timestamp"].isnull().all():
                     min_date = visitor_df["timestamp"].min().date(); max_date = visitor_df["timestamp"].max().date()
@@ -648,7 +648,7 @@ def render_admin_analytics():
                 else: 
                     with col1_filter: st.info("No timestamp data for date filter.")
                 if "persistent_user_id" in visitor_df and not visitor_df["persistent_user_id"].isnull().all():
-                    user_id_options = [\"All\"] + visitor_df["persistent_user_id"].unique().tolist()
+                    user_id_options = ['All'] + visitor_df["persistent_user_id"].unique().tolist()
                     with col2_filter: user_id_filter = st.selectbox("Filter by User ID", options=user_id_options, index=0, key="admin_user_filter")
                 else: 
                     with col2_filter: st.info("No user ID data for filter.")
@@ -658,19 +658,19 @@ def render_admin_analytics():
                 if date_range and len(date_range) == 2 and "timestamp" in filtered_df:
                     start_date, end_date = date_range
                     filtered_df = filtered_df[(filtered_df["timestamp"].dt.date >= start_date) & (filtered_df["timestamp"].dt.date <= end_date)]
-                if user_id_filter != \"All\" and "persistent_user_id" in filtered_df:
+                if user_id_filter != 'All' and "persistent_user_id" in filtered_df:
                     filtered_df = filtered_df[filtered_df["persistent_user_id"] == user_id_filter]
-                display_cols = [col for col in [\"timestamp\", \"persistent_user_id\", \"is_authenticated\", \"visit_count\", \"page\", \"action\", \"feature_used\", \"ip_address\", \"session_id\", \"log_id\"] if col in filtered_df.columns]
+                display_cols = [col for col in ['timestamp', 'persistent_user_id', 'is_authenticated', 'visit_count', 'page', 'action', 'feature_used', 'ip_address', 'session_id', 'log_id'] if col in filtered_df.columns]
                 st.dataframe(filtered_df[display_cols])
                 if st.button("Export Filtered to CSV", key="admin_export_btn"):
                     csv = filtered_df[display_cols].to_csv(index=False)
                     b64 = base64.b64encode(csv.encode()).decode()
-                    href = f\"<a href=\"data:file/csv;base64,{b64}\" download=\"filtered_visitor_logs.csv\">Download CSV File</a>\"
+                    href = f'<a href='data:file/csv;base64,{b64}' download='filtered_visitor_logs.csv'>Download CSV File</a>'
                     st.markdown(href, unsafe_allow_html=True)
                     log_visitor_activity("Admin Dashboard", action="export_csv")
             except Exception as filter_err:
                 st.error(f"Error applying filters or displaying data: {filter_err}")
-                fallback_cols = [col for col in [\"timestamp\", \"persistent_user_id\", \"action\"] if col in visitor_df.columns]
+                fallback_cols = [col for col in ['timestamp', 'persistent_user_id', 'action'] if col in visitor_df.columns]
                 st.dataframe(visitor_df[fallback_cols])
                 
         if st.button("Logout Admin", key="admin_logout_btn"):
@@ -713,11 +713,11 @@ def add_javascript_functionality():
     <script>
     // Function to copy text to clipboard
     function copyToClipboard(text) {
-        const textarea = document.createElement(\"textarea\");
+        const textarea = document.createElement(\"textarea');
         textarea.value = text;
         document.body.appendChild(textarea);
         textarea.select();
-        document.execCommand(\"copy\");
+        document.execCommand('copy');
         document.body.removeChild(textarea);
     }
     
@@ -736,84 +736,84 @@ def add_javascript_functionality():
 
     const setupInteractions = () => {
         // Copy functionality for chat messages
-        const chatMessages = document.querySelectorAll(\".chat-message\");
+        const chatMessages = document.querySelectorAll('.chat-message');
         chatMessages.forEach(function(message) {
-            if (!message.querySelector(\".copy-tooltip\")) {
-                const tooltip = document.createElement(\"span\");
-                tooltip.className = \"copy-tooltip\";
-                tooltip.textContent = \"Copied!\";
+            if (!message.querySelector('.copy-tooltip')) {
+                const tooltip = document.createElement('span');
+                tooltip.className = 'copy-tooltip';
+                tooltip.textContent = 'Copied!';
                 message.appendChild(tooltip);
             }
             let longPressTimer;
             const handleStart = (e) => {
                 longPressTimer = setTimeout(() => {
-                    const textToCopy = message.innerText.replace(\"Copied!\", \"\").trim();
+                    const textToCopy = message.innerText.replace('Copied!', '').trim();
                     copyToClipboard(textToCopy);
-                    const tooltip = message.querySelector(\".copy-tooltip\");
+                    const tooltip = message.querySelector('.copy-tooltip');
                     if (tooltip) {
-                        tooltip.style.display = \"block\";
-                        setTimeout(() => { tooltip.style.display = \"none\"; }, 1500);
+                        tooltip.style.display = 'block';
+                        setTimeout(() => { tooltip.style.display = 'none'; }, 1500);
                     }
                 }, 500);
             };
             const handleEnd = () => { clearTimeout(longPressTimer); };
-            message.removeEventListener(\"mousedown\", handleStart);
-            message.removeEventListener(\"mouseup\", handleEnd);
-            message.removeEventListener(\"mouseleave\", handleEnd);
-            message.removeEventListener(\"touchstart\", handleStart);
-            message.removeEventListener(\"touchend\", handleEnd);
-            message.removeEventListener(\"touchmove\", handleEnd);
-            message.addEventListener(\"mousedown\", handleStart);
-            message.addEventListener(\"mouseup\", handleEnd);
-            message.addEventListener(\"mouseleave\", handleEnd);
-            message.addEventListener(\"touchstart\", handleStart, { passive: true });
-            message.addEventListener(\"touchend\", handleEnd);
-            message.addEventListener(\"touchmove\", handleEnd, { passive: true });
+            message.removeEventListener('mousedown', handleStart);
+            message.removeEventListener('mouseup', handleEnd);
+            message.removeEventListener('mouseleave', handleEnd);
+            message.removeEventListener('touchstart', handleStart);
+            message.removeEventListener('touchend', handleEnd);
+            message.removeEventListener('touchmove', handleEnd);
+            message.addEventListener('mousedown', handleStart);
+            message.addEventListener('mouseup', handleEnd);
+            message.addEventListener('mouseleave', handleEnd);
+            message.addEventListener('touchstart', handleStart, { passive: true });
+            message.addEventListener('touchend', handleEnd);
+            message.addEventListener('touchmove', handleEnd, { passive: true });
         });
         
         // Collapsible About Us
-        const aboutUsHeader = document.querySelector(\".about-us-header\");
-        const aboutUsContent = document.querySelector(\".about-us-content\");
+        const aboutUsHeader = document.querySelector('.about-us-header');
+        const aboutUsContent = document.querySelector('.about-us-content');
         if (aboutUsHeader && aboutUsContent) {
-            if (!aboutUsContent.classList.contains(\"initialized\")) {
-                 aboutUsContent.style.display = \"none\";
-                 aboutUsContent.classList.add(\"initialized\");
+            if (!aboutUsContent.classList.contains('initialized')) {
+                 aboutUsContent.style.display = 'none';
+                 aboutUsContent.classList.add('initialized');
             }
-            aboutUsHeader.removeEventListener(\"click\", toggleAboutUs);
-            aboutUsHeader.addEventListener(\"click\", toggleAboutUs);
+            aboutUsHeader.removeEventListener('click', toggleAboutUs);
+            aboutUsHeader.addEventListener('click', toggleAboutUs);
         }
     };
     
     const toggleAboutUs = () => {
-        const aboutUsContent = document.querySelector(\".about-us-content\");
+        const aboutUsContent = document.querySelector('.about-us-content');
         if (aboutUsContent) {
-            aboutUsContent.style.display = (aboutUsContent.style.display === \"none\") ? \"block\" : \"none\";
+            aboutUsContent.style.display = (aboutUsContent.style.display === 'none') ? 'block' : 'none';
         }
     };
 
     const observer = new MutationObserver(debounce((mutationsList, observer) => {
         for(const mutation of mutationsList) {
-            if (mutation.type === \"childList\" && mutation.addedNodes.length > 0) {
+            if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
                  setupInteractions();
                  break;
             }
         }
     }, 250));
 
-    const targetNode = window.parent.document.querySelector(\"section.main\");
+    const targetNode = window.parent.document.querySelector('section.main');
     if (targetNode) {
         observer.observe(targetNode, { childList: true, subtree: true });
     } else {
-        window.addEventListener(\"load\", () => {
-             const fallbackNode = window.parent.document.querySelector(\"section.main\");
+        window.addEventListener('load', () => {
+             const fallbackNode = window.parent.document.querySelector('section.main');
              if(fallbackNode) observer.observe(fallbackNode, { childList: true, subtree: true });
         });
     }
 
-    if (document.readyState === \"complete\") {
+    if (document.readyState === 'complete') {
         setupInteractions();
     } else {
-        window.addEventListener(\"load\", setupInteractions);
+        window.addEventListener('load', setupInteractions);
     }
     </script>
     """, unsafe_allow_html=True)
@@ -824,7 +824,7 @@ apply_custom_css()
 
 # --- Capture User Agent --- 
 def capture_user_agent():
-    if \"user_agent\" not in st.session_state:
+    if \"user_agent' not in st.session_state:
         try:
             user_agent_val = components.html(
                 """
@@ -860,9 +860,9 @@ def load_and_clean_data(uploaded_file_content):
         if df.shape[1] < 2: st.error("File must have at least two columns (Date, Level)."); return None
         date_col = next((col for col in df.columns if any(kw in col.lower() for kw in ["date", "time"])), None)
         level_col = next((col for col in df.columns if any(kw in col.lower() for kw in ["level", "groundwater", "gwl"])), None)
-        if not date_col: st.error("Cannot find Date column (e.g., named \"Date\", \"Time\")."); return None
-        if not level_col: st.error("Cannot find Level column (e.g., named \"Level\", \"Groundwater Level\")."); return None
-        st.success(f"Identified columns: Date=\"{date_col}\", Level=\"{level_col}\". Renaming to \"Date\" and \"Level\".")
+        if not date_col: st.error("Cannot find Date column (e.g., named \"Date', 'Time')."); return None
+        if not level_col: st.error("Cannot find Level column (e.g., named 'Level', 'Groundwater Level')."); return None
+        st.success(f"Identified columns: Date='{date_col}', Level='{level_col}'. Renaming to 'Date' and 'Level'.")
         df = df.rename(columns={date_col: "Date", level_col: "Level"})[["Date", "Level"]]
         df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
         df["Level"] = pd.to_numeric(df["Level"], errors="coerce")
@@ -889,7 +889,7 @@ def create_sequences(data, sequence_length):
 
 @st.cache_resource
 def load_keras_model_from_file(uploaded_file_obj, model_name_for_log):
-    temp_model_path = f"temp_{model_name_for_log.replace(\" \", \"_\")}.h5"
+    temp_model_path = f"temp_{model_name_for_log.replace(' ', '_')}.h5"
     try:
         with open(temp_model_path, "wb") as f: f.write(uploaded_file_obj.getbuffer())
         model = load_model(temp_model_path, compile=False)
@@ -1010,7 +1010,7 @@ def generate_gemini_report(hist_df, forecast_df, metrics, language):
         **Instructions:**
         1.  **Introduction:** Briefly state the purpose - analyzing historical groundwater levels and evaluating an LSTM forecast.
         2.  **Historical Data Insights:** Describe key trends, seasonality (if apparent), and notable high/low periods observed in the historical data. Mention the overall range (min/max levels).
-        3.  **Forecast Evaluation:** Comment on the model\"s performance based on the provided metrics (RMSE, MAE, MAPE). Interpret what these values imply about the forecast accuracy (e.g., low MAE suggests good average prediction).
+        3.  **Forecast Evaluation:** Comment on the model's performance based on the provided metrics (RMSE, MAE, MAPE). Interpret what these values imply about the forecast accuracy (e.g., low MAE suggests good average prediction).
         4.  **Forecast Analysis:** Describe the predicted trend for the forecast period. Mention the confidence interval (Lower/Upper CI) and what it suggests about the forecast uncertainty.
         5.  **Conclusion & Recommendations:** Summarize the findings. Briefly mention potential applications or limitations based on the analysis and forecast uncertainty. Avoid definitive statements; use cautious language.
 
@@ -1038,13 +1038,13 @@ def get_gemini_chat_response(user_query, chat_hist, hist_df, forecast_df, metric
     try:
         history_context = "\n".join([f"{sender}: {str(message)}" for sender, message in chat_hist])
         context = f"""You are an AI assistant helping a user understand groundwater level data and forecast results. 
-        Use the following context to answer the user\"s query accurately and concisely. 
+        Use the following context to answer the user's query accurately and concisely. 
         
         **Available Context:**
         - Historical Data Period: {hist_df["Date"].min():%Y-%m-%d} to {hist_df["Date"].max():%Y-%m-%d}
         - Forecast Period: {forecast_df["Date"].min():%Y-%m-%d} to {forecast_df["Date"].max():%Y-%m-%d}
         - Model Evaluation Metrics: RMSE={metrics.get("RMSE", "N/A"):.4f}, MAE={metrics.get("MAE", "N/A"):.4f}, MAPE={metrics.get("MAPE", "N/A"):.2f}%
-        - AI Report Summary (if available): {str(ai_report)[:500] if ai_report else \"Not generated yet.\"}...
+        - AI Report Summary (if available): {str(ai_report)[:500] if ai_report else 'Not generated yet.'}...
         - Historical Data Summary:
         {hist_df["Level"].describe().to_string()}
         - Forecast Data Summary:
@@ -1055,7 +1055,7 @@ def get_gemini_chat_response(user_query, chat_hist, hist_df, forecast_df, metric
         
         **User Query:** {user_query}
         
-        **Instructions:** Answer the user\"s query based *only* on the provided context and chat history. Be helpful and informative. If the answer isn\"t in the context, say so.
+        **Instructions:** Answer the user's query based *only* on the provided context and chat history. Be helpful and informative. If the answer isn't in the context, say so.
         
         AI Assistant:"""
         response = model.generate_content(context)
@@ -1110,7 +1110,7 @@ def run_forecast_pipeline(df, model_choice, forecast_horizon, custom_model_file_
              # Recalculate internal params based on new min/max
              scaler_obj.min_ = np.array([custom_scaler_min_param * scaler_obj.scale_ + scaler_obj.feature_range[0]])
              scaler_obj.scale_ = (scaler_obj.feature_range[1] - scaler_obj.feature_range[0]) / (scaler_obj.data_range_)
-             st.warning("Applied custom scaling parameters. Ensure they match the model\"s training data.")
+             st.warning("Applied custom scaling parameters. Ensure they match the model's training data.")
         scaled_data = scaler_obj.transform(df["Level"].values.reshape(-1, 1))
         st.info("Data scaling complete.")
 
@@ -1189,7 +1189,7 @@ class StreamlitCallback(tf.keras.callbacks.Callback):
     def on_epoch_end(self, epoch, logs=None):
         logs = logs or {}; progress = (epoch + 1) / self.total_epochs
         self.progress_bar.progress(progress)
-        loss = logs.get(\"loss\", \"N/A\"); val_loss = logs.get(\"val_loss\", \"N/A\")
+        loss = logs.get(\"loss', 'N/A'); val_loss = logs.get('val_loss', 'N/A')
         loss_str = f"{loss:.4f}" if isinstance(loss, float) else loss
         val_loss_str = f"{val_loss:.4f}" if isinstance(val_loss, float) else val_loss
         self.status_text.text(f"Epoch {epoch+1}/{self.total_epochs} | Loss: {loss_str} | Val Loss: {val_loss_str}")
@@ -1235,7 +1235,7 @@ with st.sidebar:
     
     st.header("2. Model & Forecast")
     model_choice = st.selectbox("Model Type", ("Standard Pre-trained Model", "Train New Model", "Upload Custom .h5 Model"), key="model_select")
-    if fbase_init_success and st.session_state.get(\"last_model_choice\") != model_choice:
+    if fbase_init_success and st.session_state.get('last_model_choice') != model_choice:
          log_visitor_activity("Sidebar", "select_model", feature_used=model_choice)
          st.session_state.last_model_choice = model_choice
 
@@ -1284,7 +1284,7 @@ with st.sidebar:
                     st.error("Please upload a custom .h5 model file.")
                     st.session_state.run_forecast_triggered = False
                 else:
-                    log_visitor_activity("Sidebar", "run_forecast", feature_used=\"Forecast\")
+                    log_visitor_activity("Sidebar", "run_forecast", feature_used='Forecast')
                     with st.spinner(f"Running forecast ({model_choice})..."):
                         forecast_df, metrics, history, scaler_obj = run_forecast_pipeline(
                             st.session_state.cleaned_data, model_choice, forecast_horizon_sidebar, 
@@ -1311,7 +1311,7 @@ with st.sidebar:
         else:
             st.warning(message)
             show_google_login()
-            log_visitor_activity("Sidebar", "run_forecast_denied", feature_used=\"Forecast\")
+            log_visitor_activity("Sidebar", "run_forecast_denied", feature_used='Forecast')
 
     st.header("3. AI Analysis")
     st.session_state.report_language = st.selectbox("Report Language", ["English", "French"], key="report_lang_select", disabled=not gemini_init_success)
@@ -1323,7 +1323,7 @@ with st.sidebar:
         if access_granted:
             if not gemini_init_success: st.error("AI Report disabled. Gemini not configured.")
             elif st.session_state.cleaned_data is not None and st.session_state.forecast_results is not None and st.session_state.evaluation_metrics is not None:
-                log_visitor_activity("Sidebar", "generate_report", feature_used=\"AI Report\")
+                log_visitor_activity("Sidebar", "generate_report", feature_used='AI Report')
                 with st.spinner(f"Generating AI report ({st.session_state.report_language})..."):
                     st.session_state.ai_report = generate_gemini_report(
                         st.session_state.cleaned_data, st.session_state.forecast_results,
@@ -1340,7 +1340,7 @@ with st.sidebar:
         else:
             st.warning(message)
             show_google_login()
-            log_visitor_activity("Sidebar", "generate_report_denied", feature_used=\"AI Report\")
+            log_visitor_activity("Sidebar", "generate_report_denied", feature_used='AI Report')
 
     # Download PDF Button
     if st.button("Download Report (PDF)", key="download_report_btn", use_container_width=True):
@@ -1383,12 +1383,12 @@ with st.sidebar:
                     pdf.cell(col_widths[0], 7, txt="Date", border=1); pdf.cell(col_widths[1], 7, txt="Forecast", border=1); pdf.cell(col_widths[2], 7, txt="Lower CI", border=1); pdf.cell(col_widths[3], 7, txt="Upper CI", border=1, new_x="LMARGIN", new_y="NEXT")
                     forecast_table_df = st.session_state.forecast_results.head(10) if st.session_state.forecast_results is not None else pd.DataFrame()
                     for _, row in forecast_table_df.iterrows():
-                        pdf.cell(col_widths[0], 6, txt=str(row["Date"].date()), border=1); pdf.cell(col_widths[1], 6, txt=f"{row[\"Forecast\"]:.2f}", border=1); pdf.cell(col_widths[2], 6, txt=f"{row[\"Lower_CI\"]:.2f}", border=1); pdf.cell(col_widths[3], 6, txt=f"{row[\"Upper_CI\"]:.2f}", border=1, new_x="LMARGIN", new_y="NEXT")
+                        pdf.cell(col_widths[0], 6, txt=str(row["Date"].date()), border=1); pdf.cell(col_widths[1], 6, txt=f"{row[\"Forecast']:.2f}", border=1); pdf.cell(col_widths[2], 6, txt=f"{row['Lower_CI']:.2f}", border=1); pdf.cell(col_widths[3], 6, txt=f"{row['Upper_CI']:.2f}", border=1, new_x="LMARGIN", new_y="NEXT")
                     pdf.ln(5)
                     pdf.set_font(report_font, "B", size=11); pdf.cell(0, 10, txt=f"AI Report ({st.session_state.report_language})", new_x="LMARGIN", new_y="NEXT"); pdf.ln(1)
                     pdf.set_font(report_font, size=10); ai_report_text = st.session_state.ai_report or "AI Report not available."
                     try: pdf.multi_cell(0, 5, txt=ai_report_text)
-                    except UnicodeEncodeError: pdf.multi_cell(0, 5, txt=ai_report_text.encode(\"latin-1\", \"replace\").decode(\"latin-1\"))
+                    except UnicodeEncodeError: pdf.multi_cell(0, 5, txt=ai_report_text.encode(\"latin-1', 'replace').decode('latin-1'))
                     pdf.ln(5)
                     pdf_output_bytes = pdf.output(dest="S").encode("latin-1")
                     st.download_button(label="Download PDF Now", data=pdf_output_bytes, file_name="deephydro_forecast_report.pdf", mime="application/octet-stream", key="pdf_download_final_btn", use_container_width=True)
@@ -1411,19 +1411,19 @@ with st.sidebar:
             if access_granted:
                 if st.session_state.cleaned_data is not None and st.session_state.forecast_results is not None and st.session_state.evaluation_metrics is not None:
                     st.session_state.chat_active = True; st.session_state.active_tab = 4
-                    log_visitor_activity("Sidebar", "activate_chat", feature_used=\"AI Chat\"); st.rerun()
+                    log_visitor_activity("Sidebar", "activate_chat", feature_used='AI Chat'); st.rerun()
                 else: st.error("Cannot activate chat. Run a successful forecast first.")
             else:
                 st.warning(message); show_google_login()
-                log_visitor_activity("Sidebar", "activate_chat_denied", feature_used=\"AI Chat\")
+                log_visitor_activity("Sidebar", "activate_chat_denied", feature_used='AI Chat')
 
     # About Us
-    st.markdown(\"<div class=\"about-us-header\">👥 About Us</div>\", unsafe_allow_html=True)
-    st.markdown(\"<div class=\"about-us-content\">\", unsafe_allow_html=True)
+    st.markdown('<div class='about-us-header'>👥 About Us</div>', unsafe_allow_html=True)
+    st.markdown('<div class='about-us-content'>', unsafe_allow_html=True)
     st.markdown("Specializing in groundwater forecasting using AI.")
     st.markdown("**Contact:** [deephydro@example.com](mailto:deephydro@example.com)")
     st.markdown("© 2025 DeepHydro AI Team")
-    st.markdown(\"</div>\", unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
     
     # Admin Analytics Access
     st.header("5. Admin")
@@ -1440,14 +1440,14 @@ st.title("DeepHydro AI Forecasting")
 log_visitor_activity("Main Page", "view")
 
 # App Introduction
-st.markdown(\"<div class=\"app-intro\">\", unsafe_allow_html=True)
+st.markdown('<div class='app-intro'>', unsafe_allow_html=True)
 st.markdown("""
 ### Welcome to DeepHydro AI Forecasting
 Advanced groundwater forecasting platform using deep learning.
 **Features:** LSTM forecasting, MC Dropout uncertainty, AI interpretation, Interactive visualization.
 Upload your data using the sidebar to begin.
 """)
-st.markdown(\"</div>\", unsafe_allow_html=True)
+st.markdown('</div>', unsafe_allow_html=True)
 
 # Handle data upload and cleaning
 if uploaded_data_file is not None:
@@ -1486,7 +1486,7 @@ with tabs[0]:
         st.write(f"Shape: {st.session_state.cleaned_data.shape}")
         col1, col2 = st.columns(2)
         with col1: 
-            min_date = st.session_state.cleaned_data[\"Date\"].min(); max_date = st.session_state.cleaned_data[\"Date\"].max()
+            min_date = st.session_state.cleaned_data['Date'].min(); max_date = st.session_state.cleaned_data['Date'].max()
             st.metric("Time Range", f"{min_date:%Y-%m-%d} to {max_date:%Y-%m-%d}")
         with col2: st.metric("Data Points", len(st.session_state.cleaned_data))
         fig_data = go.Figure()
@@ -1542,8 +1542,8 @@ with tabs[3]:
     st.header("AI-Generated Scientific Report")
     if not gemini_init_success: st.warning("AI features disabled. Gemini not configured.")
     elif st.session_state.ai_report: 
-        st.markdown(f\"<div class=\"chat-message ai-message\">{st.session_state.ai_report}<span class=\"copy-tooltip\">Copied!</span></div>\", unsafe_allow_html=True)
-    else: st.info("⬅️ Click \"Generate AI Report\" in the sidebar after running a forecast.")
+        st.markdown(f'<div class='chat-message ai-message'>{st.session_state.ai_report}<span class='copy-tooltip'>Copied!</span></div>', unsafe_allow_html=True)
+    else: st.info("⬅️ Click \"Generate AI Report' in the sidebar after running a forecast.")
 
 # AI Chatbot Tab (Tab 4)
 with tabs[4]:
@@ -1558,7 +1558,7 @@ with tabs[4]:
                 for sender, message in st.session_state.chat_history:
                     msg_class = "user-message" if sender == "User" else "ai-message"
                     escaped_message = html.escape(str(message))
-                    st.markdown(f\"<div class=\"chat-message {msg_class}\">{escaped_message}<span class=\"copy-tooltip\">Copied!</span></div>\", unsafe_allow_html=True)
+                    st.markdown(f\"<div class='chat-message {msg_class}'>{escaped_message}<span class='copy-tooltip'>Copied!</span></div>', unsafe_allow_html=True)
             user_input = st.chat_input("Ask the AI assistant about the results...")
             if user_input:
                 log_visitor_activity("Chat", "send_message")
@@ -1575,7 +1575,7 @@ with tabs[4]:
             st.warning("Context (data/forecast/metrics) is missing. Please run a successful forecast first.")
             st.session_state.chat_active = False
     else:
-        st.info("⬅️ Click \"Activate Chat\" in the sidebar after running a forecast." if gemini_init_success else "AI Chat disabled.")
+        st.info("⬅️ Click \"Activate Chat' in the sidebar after running a forecast." if gemini_init_success else "AI Chat disabled.")
 
 # Admin Analytics Tab (Tab 5)
 with tabs[5]:
