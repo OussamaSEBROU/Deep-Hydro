@@ -1,3 +1,12 @@
+# -*- coding: utf-8 -*-
+"""
+Updated DeepHydro AI Streamlit Application
+
+Modifications:
+1. Refreshed user profile in session state after incrementing feature usage count in Firebase.
+2. Replaced user-facing instances of "LSTM" with "AI" or "Deep Learning".
+"""
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -150,10 +159,19 @@ def increment_feature_usage(user_id):
         ref = db.reference(f'users/{user_id}/feature_usage_count')
         # Atomically increment the count
         current_count = ref.get() or 0
-        ref.set(current_count + 1)
-        # Update session state as well
-        if 'user_profile' in st.session_state and st.session_state.user_profile:
-            st.session_state.user_profile['feature_usage_count'] = current_count + 1
+        new_count = current_count + 1
+        ref.set(new_count)
+        
+        # Update session state as well by fetching the updated profile
+        if 'user_profile' in st.session_state:
+            # Fetch the parent (user profile) data after update
+            updated_profile = ref.parent.get()
+            if updated_profile:
+                st.session_state.user_profile = updated_profile
+            else:
+                 # Fallback: update count locally if fetch fails
+                 if st.session_state.user_profile:
+                     st.session_state.user_profile['feature_usage_count'] = new_count
         return True
     except Exception as e:
         st.warning(f"Firebase error incrementing usage count for {user_id}: {e}")
@@ -813,7 +831,7 @@ if GEMINI_API_KEY and GEMINI_API_KEY != "Gemini_api_key":
 else:
     st.warning("Gemini API Key not found or is placeholder. AI features will be disabled. Set GOOGLE_API_KEY environment variable.")
 
-# --- Model Paths & Constants (unchanged) ---
+# --- Model Paths & Constants (unchanged internal logic) ---
 STANDARD_MODEL_PATH = "standard_model.h5"
 STANDARD_MODEL_SEQUENCE_LENGTH = 60
 if os.path.exists(STANDARD_MODEL_PATH):
@@ -827,7 +845,7 @@ if os.path.exists(STANDARD_MODEL_PATH):
 else:
     st.warning(f"Standard model file not found at path: {STANDARD_MODEL_PATH}. Please ensure it exists.")
 
-# --- Helper Functions (Data Loading, Model Building, Prediction - unchanged) ---
+# --- Helper Functions (Data Loading, Model Building, Prediction - internal logic unchanged) ---
 @st.cache_data # Use cache_data for data loading
 def load_and_clean_data(uploaded_file_content):
     try:
@@ -899,6 +917,7 @@ def load_standard_model_cached(path):
     except Exception as e: st.error(f"Error loading standard Keras model from {path}: {e}"); return None, None
 
 def build_lstm_model(sequence_length, n_features=1):
+    # Internal function name remains, but user facing text should avoid "LSTM"
     model = Sequential([
         LSTM(40, activation="relu", input_shape=(sequence_length, n_features)), 
         Dropout(0.5), 
@@ -994,7 +1013,7 @@ def calculate_metrics(y_true, y_pred):
         
     return {"RMSE": rmse, "MAE": mae, "MAPE": mape}
 
-# --- Plotting Functions (unchanged) ---
+# --- Plotting Functions (Updated title) ---
 def create_forecast_plot(historical_df, forecast_df):
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=historical_df["Date"], y=historical_df["Level"], mode="lines", name="Historical Data", line=dict(color="rgb(31, 119, 180)")))
@@ -1002,7 +1021,8 @@ def create_forecast_plot(historical_df, forecast_df):
     # Ensure CI traces are added correctly for fill
     fig.add_trace(go.Scatter(x=forecast_df["Date"], y=forecast_df["Upper_CI"], mode="lines", name="Upper CI (95%)", line=dict(width=0), showlegend=False))
     fig.add_trace(go.Scatter(x=forecast_df["Date"], y=forecast_df["Lower_CI"], mode="lines", name="Lower CI (95%)", line=dict(width=0), fillcolor="rgba(255, 127, 14, 0.2)", fill="tonexty", showlegend=True)) # Show legend for the filled area
-    fig.update_layout(title="Groundwater Level: Historical Data & LSTM Forecast", xaxis_title="Date", yaxis_title="Groundwater Level", hovermode="x unified", legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01), template="plotly_white")
+    # Updated Title: Replaced "LSTM Forecast" with "AI Forecast"
+    fig.update_layout(title="Groundwater Level: Historical Data & AI Forecast", xaxis_title="Date", yaxis_title="Groundwater Level", hovermode="x unified", legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01), template="plotly_white")
     return fig
 
 def create_loss_plot(history_dict):
@@ -1018,16 +1038,16 @@ def create_loss_plot(history_dict):
     fig.update_layout(title="Model Training & Validation Loss Over Epochs", xaxis_title="Epoch", yaxis_title="Loss (MSE)", hovermode="x unified", template="plotly_white")
     return fig
 
-# --- Gemini API Functions (Add LSTM restriction) ---
+# --- Gemini API Functions (Ensure prompts avoid specific model terms) ---
 def generate_gemini_report(hist_df, forecast_df, metrics, language):
     if not gemini_configured: return "AI report generation disabled. Configure Gemini API Key."
     if hist_df is None or forecast_df is None or metrics is None: return "Error: Insufficient data for AI report."
     try:
-        # Added instruction to avoid LSTM details
+        # Prompt already instructs to avoid technical details, verified.
         prompt = f"""Act as a professional hydrologist analyzing groundwater level data. 
         Provide a concise, insightful report in {language} based on the provided historical data, forecast results, and evaluation metrics. 
         Focus on the trends, forecast reliability (mentioning confidence intervals), potential implications (e.g., water availability, drought/flood risk), and recommendations for monitoring or management. 
-        **IMPORTANT: Do NOT discuss the technical details of the forecasting model itself (e.g., LSTM architecture, parameters, training process). Focus solely on the data and the forecast outcomes.**
+        **IMPORTANT: Do NOT discuss the technical details of the forecasting model itself (e.g., specific architectures, parameters, training process). Focus solely on the data and the forecast outcomes.**
 
         Historical Data Summary:
         {hist_df["Level"].describe().to_string()}
@@ -1047,7 +1067,8 @@ def generate_gemini_report(hist_df, forecast_df, metrics, language):
         forbidden_terms = ["lstm", "long short-term memory", "epoch", "layer", "dropout", "adam optimizer", "sequence length"]
         cleaned_text = response.text
         for term in forbidden_terms:
-            cleaned_text = cleaned_text.replace(term, "[modeling technique]") # Replace term
+            # Replace with a generic placeholder if accidentally included by the model
+            cleaned_text = cleaned_text.replace(term, "[modeling technique]") 
             
         return cleaned_text
     except Exception as e: st.error(f"Error generating AI report: {e}"); return f"Error generating AI report: {e}"
@@ -1056,10 +1077,10 @@ def get_gemini_chat_response(user_query, chat_hist, hist_df, forecast_df, metric
     if not gemini_configured: return "AI chat disabled. Configure Gemini API Key."
     if hist_df is None or forecast_df is None or metrics is None: return "Error: Insufficient context for AI chat."
     try:
-        # Build context string
+        # Build context string - verified prompt avoids specific model terms.
         context_parts = [
             "You are an AI assistant helping analyze groundwater forecast results.",
-            "**IMPORTANT: Do NOT discuss the technical details of the forecasting model (e.g., LSTM). Focus on interpreting the data, forecast, and report.**",
+            "**IMPORTANT: Do NOT discuss the technical details of the forecasting model (e.g., specific architectures). Focus on interpreting the data, forecast, and report.**",
             "Historical Data Summary:", hist_df["Level"].describe().to_string(),
             "Forecast Data Summary:", forecast_df[["Forecast", "Lower_CI", "Upper_CI"]].describe().to_string(),
             f"Evaluation Metrics: RMSE={metrics.get('RMSE', 'N/A'):.4f}, MAE={metrics.get('MAE', 'N/A'):.4f}, MAPE={metrics.get('MAPE', 'N/A'):.2f}%",
@@ -1078,12 +1099,13 @@ def get_gemini_chat_response(user_query, chat_hist, hist_df, forecast_df, metric
         forbidden_terms = ["lstm", "long short-term memory", "epoch", "layer", "dropout", "adam optimizer", "sequence length"]
         cleaned_text = response.text
         for term in forbidden_terms:
-            cleaned_text = cleaned_text.replace(term, "[modeling technique]") # Replace term
+             # Replace with a generic placeholder if accidentally included by the model
+            cleaned_text = cleaned_text.replace(term, "[modeling technique]")
             
         return cleaned_text
     except Exception as e: st.error(f"Error in AI chat: {e}"); return f"Error in AI chat: {e}"
 
-# --- Main Forecasting Pipeline (unchanged, but access will be checked before calling) ---
+# --- Main Forecasting Pipeline (internal logic unchanged, access checked before calling) ---
 def run_forecast_pipeline(df, model_choice, forecast_horizon, custom_model_file_obj, 
                         sequence_length_train_param, epochs_train_param, 
                         mc_iterations_param, use_custom_scaler_params_flag, custom_scaler_min_param, custom_scaler_max_param):
@@ -1145,7 +1167,8 @@ def run_forecast_pipeline(df, model_choice, forecast_horizon, custom_model_file_
             if len(X_train) == 0 or len(X_val) == 0:
                 st.error("Not enough data for train/validation split after creating sequences."); return None, None, None, None
             
-            model = build_lstm_model(model_sequence_length)
+            # Use internal function name, user doesn't see this
+            model = build_lstm_model(model_sequence_length) 
             early_stopping = EarlyStopping(monitor="val_loss", patience=10, restore_best_weights=True)
             
             # Use a Streamlit progress bar for training feedback
@@ -1310,7 +1333,8 @@ with st.sidebar:
             custom_scaler_max_sidebar = st.number_input("Original Max", value=1.0, format="%.4f", key="std_scaler_max_in")
     elif model_choice == "Train New Model":
         try:
-            sequence_length_train_sidebar = st.number_input("LSTM Sequence Length", min_value=10, max_value=365, value=default_sequence_length, step=10, key="seq_len_train_in")
+            # Updated Label: Replaced "LSTM Sequence Length" with "Model Sequence Length"
+            sequence_length_train_sidebar = st.number_input("Model Sequence Length", min_value=10, max_value=365, value=default_sequence_length, step=10, key="seq_len_train_in")
         except Exception as e:
             st.warning(f"Using default sequence length {default_sequence_length} due to: {e}")
             sequence_length_train_sidebar = default_sequence_length
@@ -1521,7 +1545,8 @@ with st.sidebar:
     # --- About Us (unchanged) ---
     st.markdown('<div class="about-us-header">👥 About Us</div>', unsafe_allow_html=True)
     st.markdown('<div class="about-us-content">', unsafe_allow_html=True)
-    st.markdown("Specializing in groundwater forecasting using AI.")
+    # Updated Text: Replaced "using AI" with more general phrasing if needed, but it's already general.
+    st.markdown("Specializing in groundwater forecasting using AI.") 
     st.markdown("**Contact:** [deephydro@example.com](mailto:deephydro@example.com)")
     st.markdown("© 2025 DeepHydro AI Team")
     st.markdown('</div>', unsafe_allow_html=True)
@@ -1540,12 +1565,12 @@ st.title("DeepHydro AI Forecasting")
 if firebase_initialized:
     log_visitor_activity("Main Page", "view")
 
-# App Introduction (unchanged)
+# App Introduction (Updated Text)
 st.markdown('<div class="app-intro">', unsafe_allow_html=True)
 st.markdown("""
 ### Welcome to DeepHydro AI Forecasting
 Advanced groundwater forecasting platform using deep learning.
-**Features:** LSTM forecasting, MC Dropout uncertainty, AI interpretation, Interactive visualization.
+**Features:** AI forecasting, MC Dropout uncertainty, AI interpretation, Interactive visualization.
 Upload your data to begin.
 """)
 st.markdown('</div>', unsafe_allow_html=True)
@@ -1555,7 +1580,7 @@ if uploaded_data_file is not None:
     # Process only if the file is new
     if st.session_state.get("uploaded_data_filename") != uploaded_data_file.name:
         st.session_state.uploaded_data_filename = uploaded_data_file.name
-        with st.spinner("Loading and cleaning data..."):
+        with st.spinner("Loading and cleaning data..."): 
             cleaned_df_result = load_and_clean_data(uploaded_data_file.getvalue())
         if cleaned_df_result is not None:
             st.session_state.cleaned_data = cleaned_df_result
@@ -1666,7 +1691,7 @@ with tabs[4]:
                 #      st.markdown(f'<div class="chat-message user-message">{user_input}<span class="copy-tooltip">Copied!</span></div>', unsafe_allow_html=True)
                 
                 # Get AI response
-                with st.spinner("AI thinking..."):
+                with st.spinner("AI thinking..."): 
                     ai_response = get_gemini_chat_response(
                         user_input, st.session_state.chat_history, st.session_state.cleaned_data,
                         st.session_state.forecast_results, st.session_state.evaluation_metrics, st.session_state.ai_report
