@@ -5,6 +5,8 @@ Updated DeepHydro AI Streamlit Application
 Modifications:
 1. Refreshed user profile in session state after incrementing feature usage count in Firebase.
 2. Replaced user-facing instances of "LSTM" with "AI" or "Deep Learning".
+3. Removed unsupported 'key' argument from components.html calls.
+4. Refactored embedded CSS and JavaScript into separate functions for better structure.
 """
 
 import streamlit as st
@@ -199,26 +201,19 @@ def check_feature_access():
     else:
         return False, f"Usage limit ({ADVANCED_FEATURE_LIMIT}) reached. Please log in with Google to continue."
 
-# Placeholder for Google Sign-In component (to be implemented in Step 4)
+# Placeholder for Google Sign-In component
 def show_google_login_button():
     """Displays the Google Sign-In button and handles the callback."""
     st.warning(f"Usage limit ({ADVANCED_FEATURE_LIMIT}) reached for advanced features.")
     st.info("Please log in with Google to continue using AI Report, Forecasting, and AI Chat.")
-    
-    # --- Google Sign-In Button Implementation (Step 4) --- 
-    # This section will contain the Streamlit component for Google Sign-In
-    # It will need your Google Cloud Client ID
     
     google_client_id = os.getenv("GOOGLE_CLIENT_ID")
     if not google_client_id:
         st.error("Google Client ID not configured. Cannot enable Google Sign-In. Set GOOGLE_CLIENT_ID environment variable.")
         return
 
-    # Use streamlit-google-oauth component (requires installation: pip install streamlit-google-oauth)
-    # Or implement custom component using components.html
-    
-    # Example using components.html (Simplified - needs proper handling)
-    # This is a basic structure and needs refinement for robustness, error handling, and security.
+    # Use components.html for Google Sign-In button
+    # Removed the 'key' argument as it's not supported by components.html
     components.html(f"""
         <script src="https://accounts.google.com/gsi/client" async defer></script>
         <div id="g_id_onload"
@@ -236,40 +231,32 @@ def show_google_login_button():
         </div>
         <script>
           function handleCredentialResponse(response) {{
-            /* Decode the ID token to get user info (SHOULD BE DONE SERVER-SIDE for security) */
-            /* For demo purposes, we'll just send the credential back */
-            console.log("Encoded JWT ID token: " + response.credential);
             /* Send the credential to Streamlit backend */
+            console.log("Encoded JWT ID token: " + response.credential);
             window.parent.postMessage({{
                 'type': 'streamlit:setComponentValue',
-                'key': 'google_auth_callback',
+                'key': 'google_auth_callback', /* Key used by Streamlit to retrieve value */
                 'value': response.credential
             }}, '*');
           }}
         </script>
-
+        """, height=100)
 
     # Handle the callback value from the component
+    # Streamlit uses the 'key' in postMessage to store the value in session_state
     credential_token = st.session_state.get('google_auth_callback')
     if credential_token:
         # --- IMPORTANT SECURITY NOTE --- 
         # Decoding the JWT and verifying it SHOULD happen server-side.
-        # Doing it purely in the frontend is insecure.
-        # For this example, we'll simulate decoding (replace with proper server-side verification)
+        # For this example, we'll simulate decoding.
         try:
-            # Simulate decoding (replace with actual JWT library like PyJWT)
-            # This is NOT secure - just for demonstration flow
             import jwt # Requires PyJWT: pip install pyjwt
-            # In a real app, you'd verify the signature, audience, issuer, expiry etc.
-            # decoded_token = jwt.decode(credential_token, options={"verify_signature": False}) # INSECURE EXAMPLE
-            
-            # --- Placeholder for User Info --- 
-            # Replace this with actual info extracted from a *verified* token
+            # --- Placeholder for User Info (Replace with actual verified token info) ---
             decoded_token = {
-                'email': 'user@example.com', # Placeholder
-                'name': 'Test User',        # Placeholder
-                'picture': 'https://lh3.googleusercontent.com/a/ACg8ocJ9...=s96-c', # Placeholder
-                'sub': '12345678901234567890' # Placeholder Google ID
+                'email': 'user@example.com', 
+                'name': 'Test User',        
+                'picture': 'https://lh3.googleusercontent.com/a/ACg8ocJ9...=s96-c', 
+                'sub': '12345678901234567890' 
             }
             # --- End Placeholder --- 
             
@@ -280,11 +267,11 @@ def show_google_login_button():
                 'name': decoded_token.get('name'),
                 'picture': decoded_token.get('picture')
             }
-            st.session_state.persistent_user_id = st.session_state.google_user_info.get('id', st.session_state.google_user_info.get('email')) # Update persistent ID
+            st.session_state.persistent_user_id = st.session_state.google_user_info.get('id', st.session_state.google_user_info.get('email'))
             
-            # Update Firebase profile immediately
+            # Update Firebase profile
             user_id = get_persistent_user_id()
-            profile, _ = get_or_create_user_profile(user_id) # This will now use Google ID/email
+            profile, _ = get_or_create_user_profile(user_id)
             if profile:
                 try:
                     ref = db.reference(f'users/{user_id}')
@@ -293,18 +280,16 @@ def show_google_login_button():
                         'google_user_info': st.session_state.google_user_info,
                         'last_login_google': datetime.datetime.now().isoformat()
                     }
-                    # If the profile was just created with the Google ID, set initial values too
                     if profile.get('visit_count', 0) <= 1:
                          update_data['first_visit'] = profile.get('first_visit', datetime.datetime.now().isoformat())
                          update_data['visit_count'] = 1
                          update_data['feature_usage_count'] = profile.get('feature_usage_count', 0)
                          
                     ref.update(update_data)
-                    st.session_state.user_profile = ref.get() # Refresh profile in session state
+                    st.session_state.user_profile = ref.get() # Refresh profile
                     st.success("Google login successful! Advanced features unlocked.")
-                    # Clear the callback value to prevent re-triggering
-                    st.session_state.google_auth_callback = None 
-                    time.sleep(1.5) # Give user time to see message
+                    st.session_state.google_auth_callback = None # Clear callback value
+                    time.sleep(1.5)
                     st.rerun()
                 except Exception as e:
                     st.error(f"Firebase error updating profile after login: {e}")
@@ -313,47 +298,32 @@ def show_google_login_button():
                  
         except Exception as e:
             st.error(f"Error processing Google Sign-In: {e}")
-            # Clear the callback value on error
             st.session_state.google_auth_callback = None
 
-# --- Visitor Analytics Functions --- (Modified for Google Auth)
+# --- Visitor Analytics Functions --- 
 def get_session_id():
-    """Create or retrieve a unique session ID for the current user session."""
+    """Create or retrieve a unique session ID."""
     if 'session_id' not in st.session_state:
         st.session_state.session_id = str(uuid.uuid4())
     return st.session_state.session_id
 
 def log_visitor_activity(page_name, action="page_view", feature_used=None):
-    """
-    Log visitor activity to Firebase Realtime Database, including persistent user ID.
-    
-    Args:
-        page_name: The name of the page or section being viewed/interacted with.
-        action: The action performed (e.g., page_view, run_forecast, generate_report).
-        feature_used: Specific feature used (e.g., 'Forecast', 'AI Report', 'AI Chat') - used for usage counting.
-    """
+    """Log visitor activity to Firebase."""
     if not firebase_admin._apps:
-        return # Skip logging if Firebase is not initialized
-
+        return
     try:
-        user_id = get_persistent_user_id() # Get persistent ID (hashed anonymous or Google ID/email)
-        profile, is_new = get_or_create_user_profile(user_id) # Ensure profile exists and update visit count
+        user_id = get_persistent_user_id()
+        profile, _ = get_or_create_user_profile(user_id)
         
-        # Check access and increment usage count *before* logging the successful action
-        # for the specific features that count towards the limit.
         should_increment = feature_used in ['Forecast', 'AI Report', 'AI Chat']
-        access_granted, _ = check_feature_access() # Check access status
+        access_granted, _ = check_feature_access()
         
         if should_increment:
-            # Only increment if access is granted (either under limit or authenticated)
             if access_granted:
                 increment_feature_usage(user_id)
             else:
-                # If access was denied but they tried to use the feature, log the attempt but don't increment
-                action = f"denied_{action}" # Log the denial
-                pass # Do not increment usage count
+                action = f"denied_{action}"
 
-        # Proceed with logging the activity
         ref = db.reference('visitors_log') 
         log_id = str(uuid.uuid4())
         timestamp = datetime.datetime.now().isoformat()
@@ -364,95 +334,67 @@ def log_visitor_activity(page_name, action="page_view", feature_used=None):
 
         log_data = {
             'timestamp': timestamp,
-            'persistent_user_id': user_id, # Track via persistent ID
+            'persistent_user_id': user_id,
             'is_authenticated': is_authenticated,
             'visit_count': profile.get('visit_count', 1) if profile else 1,
-            'ip_address': ip_address, # Logged for info, not tracking ID
+            'ip_address': ip_address,
             'page': page_name,
             'action': action,
-            'feature_used': feature_used, # Log which feature was used
+            'feature_used': feature_used,
             'session_id': session_id,
             'user_agent': user_agent,
-            'google_email': st.session_state.google_user_info.get('email') if is_authenticated else None # Log email if authenticated
+            'google_email': st.session_state.google_user_info.get('email') if is_authenticated else None
         }
-        
         ref.child(log_id).set(log_data)
-        # st.info(f"Logged activity: {action} on {page_name} by {user_id}") # Debug
-
     except Exception as e:
-        # Silently fail logging to not disrupt user experience
-        # print(f"Error logging visitor activity: {e}") # Optional: log to console/file
-        pass
+        pass # Silently fail logging
 
 def fetch_visitor_logs():
-    """
-    Fetch visitor logs from Firebase for admin viewing.
-    Returns a pandas DataFrame with the visitor data.
-    """
+    """Fetch visitor logs from Firebase."""
     if not firebase_admin._apps:
         return pd.DataFrame()
-    
     try:
-        ref = db.reference('visitors_log') # Use the new collection name
+        ref = db.reference('visitors_log')
         visitors_data = ref.get()
-        
-        if not visitors_data:
-            return pd.DataFrame()
-        
-        visitors_list = []
-        for log_id, data in visitors_data.items():
-            data['log_id'] = log_id
-            visitors_list.append(data)
-        
+        if not visitors_data: return pd.DataFrame()
+        visitors_list = [dict(log_id=log_id, **data) for log_id, data in visitors_data.items()]
         df = pd.DataFrame(visitors_list)
-        
-        # Convert timestamp to datetime
         df['timestamp'] = pd.to_datetime(df['timestamp'])
-        
-        # Sort by timestamp (most recent first)
         df = df.sort_values('timestamp', ascending=False)
-        
         return df
     except Exception as e:
         st.error(f"Error fetching visitor logs: {e}")
         return pd.DataFrame()
 
 def create_visitor_charts(visitor_df):
-    """
-    Create visualizations of visitor data using Plotly.
-    Args: visitor_df: DataFrame containing visitor data
-    Returns: List of Plotly figures
-    """
-    if visitor_df.empty:
-        return []
-    
+    """Create visualizations of visitor data."""
+    if visitor_df.empty: return []
     figures = []
-    
     try:
         df = visitor_df.copy()
         df['date'] = df['timestamp'].dt.date
         
-        # 1. Daily visitors (using unique persistent IDs)
+        # Daily visitors
         daily_visitors = df.groupby('date')['persistent_user_id'].nunique().reset_index(name='unique_users')
         daily_visitors['date'] = pd.to_datetime(daily_visitors['date'])
         fig1 = px.line(daily_visitors, x='date', y='unique_users', title='Daily Unique Visitors', labels={'unique_users': 'Unique Users', 'date': 'Date'})
         figures.append(fig1)
         
-        # 2. Page/Feature Popularity (using action)
+        # Action counts
         action_counts = df['action'].value_counts().reset_index()
         action_counts.columns = ['action', 'count']
         fig2 = px.bar(action_counts, x='action', y='count', title='Activity Counts by Action', labels={'count': 'Number of Times', 'action': 'Action Type'})
         figures.append(fig2)
 
-        # 3. Authenticated vs Anonymous Users (based on last known status)
+        # Auth status
         latest_status = df.sort_values('timestamp').groupby('persistent_user_id')['is_authenticated'].last().reset_index()
         auth_counts = latest_status['is_authenticated'].value_counts().reset_index()
         auth_counts.columns = ['is_authenticated', 'count']
-        auth_counts['status'] = auth_counts['is_authenticated'].map({True: 'Authenticated (Google)', False: 'Anonymous'}) # Updated label
+        auth_counts['status'] = auth_counts['is_authenticated'].map({True: 'Authenticated (Google)', False: 'Anonymous'})
         fig3 = px.pie(auth_counts, values='count', names='status', title='User Authentication Status (Latest Known)')
         figures.append(fig3)
 
-        # 4. Hourly activity heatmap
+        # Hourly activity heatmap
         try:
             df['hour'] = df['timestamp'].dt.hour
             df['day_of_week'] = df['timestamp'].dt.day_name()
@@ -465,15 +407,10 @@ def create_visitor_charts(visitor_df):
                 ordered_available_days = [day for day in day_order if day in available_days]
                 hourly_pivot = hourly_pivot.reindex(ordered_available_days)
                 available_hours = sorted(hourly_pivot.columns)
-                
-                fig4 = px.imshow(hourly_pivot, 
-                                labels=dict(x="Hour of Day", y="Day of Week", color="Activity Count"),
-                                x=[str(h) for h in available_hours],
-                                y=ordered_available_days,
-                                title="Visitor Activity by Hour and Day")
+                fig4 = px.imshow(hourly_pivot, labels=dict(x="Hour of Day", y="Day of Week", color="Activity Count"),
+                                x=[str(h) for h in available_hours], y=ordered_available_days, title="Visitor Activity by Hour and Day")
                 figures.append(fig4)
             else:
-                # Placeholder if no data
                 fig4 = go.Figure().update_layout(title="Visitor Activity by Hour and Day (No Data)")
                 fig4.add_annotation(text="Not enough data", xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
                 figures.append(fig4)
@@ -486,72 +423,48 @@ def create_visitor_charts(visitor_df):
     except Exception as e:
         st.error(f"Error creating visitor charts: {e}")
         return []
-    
     return figures
 
-# --- Admin Analytics Dashboard --- (Authentication unchanged)
+# --- Admin Analytics Dashboard --- 
 def render_admin_analytics():
-    """Render the admin analytics dashboard with authentication."""
+    """Render the admin analytics dashboard."""
     st.header("Admin Analytics Dashboard")
-    
-    # Simple password authentication (remains unchanged as per requirement 4)
-    if 'admin_authenticated' not in st.session_state:
-        st.session_state.admin_authenticated = False
+    if 'admin_authenticated' not in st.session_state: st.session_state.admin_authenticated = False
     
     if not st.session_state.admin_authenticated:
         st.info("Admin access required.")
         admin_password = st.text_input("Admin Password", type="password", key="admin_pass_input")
         if st.button("Login", key="admin_login_btn"):
-            correct_password = os.getenv("ADMIN_PASSWORD", "admin123") # Use environment variable or default
+            correct_password = os.getenv("ADMIN_PASSWORD", "admin123")
             if admin_password == correct_password:
                 st.session_state.admin_authenticated = True
                 st.rerun()
-            else:
-                st.error("Invalid password")
+            else: st.error("Invalid password")
     else:
-        # Fetch visitor logs
         visitor_df = fetch_visitor_logs()
+        if visitor_df.empty: st.info("No visitor data available yet."); return
         
-        if visitor_df.empty:
-            st.info("No visitor data available yet.")
-            return
-        
-        # Display visitor statistics
         st.subheader("Visitor Statistics")
         col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            total_activities = len(visitor_df)
-            st.metric("Total Activities Logged", total_activities)
-        
-        with col2:
-            unique_visitors = visitor_df['persistent_user_id'].nunique()
-            st.metric("Unique Visitors", unique_visitors)
-        
+        with col1: st.metric("Total Activities Logged", len(visitor_df))
+        with col2: st.metric("Unique Visitors", visitor_df['persistent_user_id'].nunique())
         with col3:
-            if 'date' not in visitor_df.columns:
-                 visitor_df['date'] = visitor_df['timestamp'].dt.date
+            if 'date' not in visitor_df.columns: visitor_df['date'] = visitor_df['timestamp'].dt.date
             today = datetime.datetime.now().date()
-            # Count unique visitors today
             today_visitors = visitor_df[visitor_df['date'] == today]['persistent_user_id'].nunique()
             st.metric("Today's Unique Visitors", today_visitors)
         
-        # Create and display visualizations
         st.subheader("Visitor Analytics")
         try:
             charts = create_visitor_charts(visitor_df)
-            for fig in charts:
-                st.plotly_chart(fig, use_container_width=True)
-        except Exception as chart_err:
-            st.error(f"Error displaying charts: {chart_err}")
+            for fig in charts: st.plotly_chart(fig, use_container_width=True)
+        except Exception as chart_err: st.error(f"Error displaying charts: {chart_err}")
         
-        # Display raw data with filters
         st.subheader("Raw Visitor Data")
         col1_filter, col2_filter = st.columns(2)
         with col1_filter:
             try:
-                min_date = visitor_df['timestamp'].min().date()
-                max_date = visitor_df['timestamp'].max().date()
+                min_date, max_date = visitor_df['timestamp'].min().date(), visitor_df['timestamp'].max().date()
                 date_range = st.date_input("Date Range", [min_date, max_date], min_value=min_date, max_value=max_date, key="admin_date_filter")
             except Exception: date_range = None
         with col2_filter:
@@ -568,9 +481,8 @@ def render_admin_analytics():
             if user_id_filter != 'All':
                 filtered_df = filtered_df[filtered_df['persistent_user_id'] == user_id_filter]
             
-            # Display relevant columns
             display_cols = ['timestamp', 'persistent_user_id', 'is_authenticated', 'google_email', 'visit_count', 'page', 'action', 'feature_used', 'ip_address', 'session_id']
-            st.dataframe(filtered_df[[col for col in display_cols if col in filtered_df.columns]]) # Show only existing columns
+            st.dataframe(filtered_df[[col for col in display_cols if col in filtered_df.columns]])
             
             if st.button("Export Filtered to CSV", key="admin_export_btn"):
                 csv = filtered_df[[col for col in display_cols if col in filtered_df.columns]].to_csv(index=False)
@@ -579,11 +491,25 @@ def render_admin_analytics():
                 st.markdown(href, unsafe_allow_html=True)
         except Exception as filter_err:
             st.error(f"Error applying filters or displaying data: {filter_err}")
-            st.dataframe(visitor_df[['timestamp', 'persistent_user_id', 'action']]) # Fallback display
+            st.dataframe(visitor_df[['timestamp', 'persistent_user_id', 'action']])
 
-# --- Custom CSS (unchanged) ---
-def apply_custom_css():
-    st.markdown("""
+# --- UI Assets --- 
+# Suggestion: For larger apps, consider loading CSS/JS from external files 
+# (e.g., assets/style.css, assets/script.js) for better organization.
+# Example: 
+# def load_asset(file_path):
+#     try:
+#         with open(file_path, 'r') as f:
+#             return f.read()
+#     except FileNotFoundError:
+#         st.warning(f"Asset file not found: {file_path}")
+#         return ""
+# css_content = load_asset("assets/style.css")
+# js_content = load_asset("assets/script.js")
+
+def get_custom_css():
+    """Returns the custom CSS string for the application."""
+    return """
     <style>
     /* Sidebar style preservation */
     .sidebar .block-container {
@@ -596,7 +522,6 @@ def apply_custom_css():
         font-size: 1.2rem;
     }
     .sidebar .stButton>button {
-        /* Keep existing button styles */
         border-radius: 4px;
         font-weight: 500;
         transition: all 0.3s;
@@ -630,25 +555,22 @@ def apply_custom_css():
         border-radius: 4px;
         margin-top: 1rem;
         font-weight: 500;
-        /* background-color: #f0f2f6; /* Optional subtle background */
     }
     .about-us-content {
         padding: 0.8rem;
         border-radius: 4px;
         margin-top: 0.5rem;
         font-size: 0.9rem;
-        /* background-color: #ffffff; /* Optional subtle background */
-        /* border: 1px solid #e0e0e0; /* Optional border */
     }
     
-    /* Main content styles (mostly unchanged) */
+    /* Main content styles */
     .main .block-container { padding-top: 1rem; padding-bottom: 1rem; }
     h1 { font-weight: 600; font-size: 1.8rem; }
     h2 { font-weight: 600; font-size: 1.5rem; }
     h3, h4 { font-weight: 500; }
     .stButton > button { border-radius: 4px; font-weight: 500; transition: all 0.3s; padding: 0.5rem 1rem; }
     .stButton > button:hover { opacity: 0.8; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
-    .css-1d391kg, .css-12oz5g7 { padding: 1rem; } /* Adjust padding if needed */
+    .css-1d391kg, .css-12oz5g7 { padding: 1rem; } 
     .card-container { border-radius: 8px; padding: 1.2rem; margin-bottom: 1rem; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
     .chat-message { padding: 1rem; border-radius: 8px; margin-bottom: 0.5rem; position: relative; }
     .user-message { border-left: 4px solid #1E88E5; background-color: #e3f2fd; }
@@ -681,11 +603,11 @@ def apply_custom_css():
         color: #333;
     }
     </style>
-    """, unsafe_allow_html=True)
+    """
 
-# --- JavaScript (unchanged) ---
-def add_javascript_functionality():
-    st.markdown("""
+def get_custom_javascript():
+    """Returns the custom JavaScript string for UI interactions."""
+    return """
     <script>
     // Function to copy text to clipboard
     function copyToClipboard(text) {
@@ -697,13 +619,14 @@ def add_javascript_functionality():
         document.body.removeChild(textarea);
     }
     
-    // Add event listeners
+    // Add event listeners after DOM is ready
     document.addEventListener('DOMContentLoaded', function() {
+        // Use a small delay to ensure Streamlit elements are fully rendered
         setTimeout(function() {
-            // Copy functionality
+            // Copy functionality for chat messages
             const chatMessages = document.querySelectorAll('.chat-message');
             chatMessages.forEach(function(message) {
-                // Add tooltip element if not present
+                // Add tooltip element dynamically if not present
                 if (!message.querySelector('.copy-tooltip')) {
                     const tooltip = document.createElement('span');
                     tooltip.className = 'copy-tooltip';
@@ -712,25 +635,22 @@ def add_javascript_functionality():
                 }
                 
                 let longPressTimer;
+                // Touch events for mobile long press
                 message.addEventListener('touchstart', function(e) {
                     longPressTimer = setTimeout(() => {
-                        const textToCopy = this.innerText.replace('Copied!', '').trim(); // Exclude tooltip text
+                        const textToCopy = this.innerText.replace('Copied!', '').trim();
                         copyToClipboard(textToCopy);
                         const tooltip = this.querySelector('.copy-tooltip');
                         if (tooltip) {
                             tooltip.style.display = 'block';
                             setTimeout(() => { tooltip.style.display = 'none'; }, 1500);
                         }
-                    }, 500); // 500ms for long press
+                    }, 500); // 500ms threshold
                 });
+                message.addEventListener('touchend', function() { clearTimeout(longPressTimer); });
+                message.addEventListener('touchmove', function() { clearTimeout(longPressTimer); });
                 
-                message.addEventListener('touchend', function() {
-                    clearTimeout(longPressTimer);
-                });
-                message.addEventListener('touchmove', function() { /* Cancel long press if finger moves */
-                    clearTimeout(longPressTimer);
-                });
-                // Add click listener for desktop
+                // Click event for desktop
                  message.addEventListener('click', function(e) {
                      const textToCopy = this.innerText.replace('Copied!', '').trim();
                      copyToClipboard(textToCopy);
@@ -742,87 +662,95 @@ def add_javascript_functionality():
                  });
             });
             
-            // Collapsible About Us
+            // Collapsible About Us section
             const aboutUsHeader = document.querySelector('.about-us-header');
             const aboutUsContent = document.querySelector('.about-us-content');
             if (aboutUsHeader && aboutUsContent) {
-                // Initial state: collapsed
+                // Initialize state if not already done
                 if (!aboutUsContent.classList.contains('initialized')) {
-                     aboutUsContent.style.display = 'none';
+                     aboutUsContent.style.display = 'none'; // Start collapsed
                      aboutUsContent.classList.add('initialized');
                 }
+                // Toggle visibility on header click
                 aboutUsHeader.addEventListener('click', function() {
-                    if (aboutUsContent.style.display === 'none') {
-                        aboutUsContent.style.display = 'block';
-                    } else {
-                        aboutUsContent.style.display = 'none';
-                    }
+                    aboutUsContent.style.display = (aboutUsContent.style.display === 'none') ? 'block' : 'none';
                 });
             }
-        }, 1000); // Delay to ensure elements are loaded
+        }, 1000); // Delay helps ensure elements exist
     });
     </script>
-    """, unsafe_allow_html=True)
+    """
+
+def apply_custom_css():
+    """Injects custom CSS into the Streamlit app."""
+    css = get_custom_css()
+    st.markdown(css, unsafe_allow_html=True)
+
+def add_javascript_functionality():
+    """Injects custom JavaScript into the Streamlit app."""
+    js = get_custom_javascript()
+    st.markdown(js, unsafe_allow_html=True)
 
 # --- Page Configuration --- 
 st.set_page_config(page_title="DeepHydro AI Forecasting", layout="wide")
+# Apply CSS and JS early in the script execution
 apply_custom_css()
-add_javascript_functionality()
+# Note: JS might need to be added later if it depends on elements rendered after this point.
+# However, the current JS uses DOMContentLoaded and setTimeout, so placing it here is acceptable.
+# If issues arise, move add_javascript_functionality() to the end of the script.
+add_javascript_functionality() 
 
-# --- Capture User Agent --- (Modified slightly for robustness)
+# --- Capture User Agent --- 
 def capture_user_agent():
-    """Capture and store the user agent in session state."""
+    """Capture and store the user agent in session state using components.html."""
     if 'user_agent' not in st.session_state:
         try:
-            # Use Streamlit components to run JavaScript that sends the user agent
-            # Use a more reliable key and check if value exists before setting
+            # Removed the 'key' argument as it's not supported by components.html
             component_value = components.html(
                 """
                 <script>
-                // Send the user agent back to Streamlit
+                // Send the user agent back to Streamlit via postMessage
                 window.parent.postMessage({
                     isStreamlitMessage: true,
                     type: "streamlit:setComponentValue",
-                    key: "user_agent_capture_component", 
+                    key: "user_agent_capture_component", /* Key used by Streamlit to retrieve value */
                     value: navigator.userAgent
                 }}, "*");
                 </script>
                 """,
                 height=0
             )
-            # Check if the component returned a value immediately (less likely)
-            if component_value:
-                 st.session_state.user_agent = component_value
             # Check if the value was set in session state by the postMessage callback
-            elif 'user_agent_capture_component' in st.session_state and st.session_state.user_agent_capture_component:
+            if 'user_agent_capture_component' in st.session_state and st.session_state.user_agent_capture_component:
                  st.session_state.user_agent = st.session_state.user_agent_capture_component
+            # Fallback if postMessage hasn't updated session state yet
+            elif component_value: 
+                 st.session_state.user_agent = component_value
             else:
                  st.session_state.user_agent = "Unknown (Capture Pending)"
         except Exception as e:
-            # Fallback if component fails
-            # print(f"User agent capture failed: {e}") # Debug
             st.session_state.user_agent = "Unknown (Capture Failed)"
 
 # --- Initialize Firebase and User Profile --- 
 firebase_initialized = initialize_firebase()
-capture_user_agent() # Attempt to capture user agent early
+capture_user_agent() # Attempt to capture user agent
 
-# Initialize user profile in session state if not already present
+# Initialize user profile
 if 'user_profile' not in st.session_state:
     if firebase_initialized:
-        user_id = get_persistent_user_id() # Get ID first
-        st.session_state.user_profile, _ = get_or_create_user_profile(user_id) # Fetch/create profile
+        user_id = get_persistent_user_id()
+        st.session_state.user_profile, _ = get_or_create_user_profile(user_id)
     else:
-        st.session_state.user_profile = None # No profile if Firebase fails
+        st.session_state.user_profile = None
 
-# --- Gemini API Configuration (unchanged) ---
+# --- Gemini API Configuration --- 
 GEMINI_API_KEY = os.getenv("GOOGLE_API_KEY")
 gemini_configured = False
 if GEMINI_API_KEY and GEMINI_API_KEY != "Gemini_api_key":
     try:
         genai.configure(api_key=GEMINI_API_KEY)
         generation_config = genai.types.GenerationConfig(temperature=0.7, top_p=0.95, top_k=40, max_output_tokens=4000)
-        gemini_model_report = genai.GenerativeModel(model_name="gemini-pro", generation_config=generation_config) # Using standard gemini-pro
+        gemini_model_report = genai.GenerativeModel(model_name="gemini-pro", generation_config=generation_config)
         gemini_model_chat = genai.GenerativeModel(model_name="gemini-pro", generation_config=generation_config)
         gemini_configured = True
     except Exception as e:
@@ -830,36 +758,35 @@ if GEMINI_API_KEY and GEMINI_API_KEY != "Gemini_api_key":
 else:
     st.warning("Gemini API Key not found or is placeholder. AI features will be disabled. Set GOOGLE_API_KEY environment variable.")
 
-# --- Model Paths & Constants (unchanged internal logic) ---
+# --- Model Paths & Constants --- 
 STANDARD_MODEL_PATH = "standard_model.h5"
 STANDARD_MODEL_SEQUENCE_LENGTH = 60
 if os.path.exists(STANDARD_MODEL_PATH):
     try:
-        # Use tf.keras.models.load_model for consistency
         _std_model_temp = tf.keras.models.load_model(STANDARD_MODEL_PATH, compile=False)
         STANDARD_MODEL_SEQUENCE_LENGTH = _std_model_temp.input_shape[1]
         del _std_model_temp
     except Exception as e:
-        st.warning(f"Could not load standard model from {STANDARD_MODEL_PATH} to infer sequence length: {e}. Using default {STANDARD_MODEL_SEQUENCE_LENGTH}.")
+        st.warning(f"Could not load standard model from {STANDARD_MODEL_PATH}: {e}. Using default {STANDARD_MODEL_SEQUENCE_LENGTH}.")
 else:
-    st.warning(f"Standard model file not found at path: {STANDARD_MODEL_PATH}. Please ensure it exists.")
+    st.warning(f"Standard model file not found: {STANDARD_MODEL_PATH}.")
 
-# --- Helper Functions (Data Loading, Model Building, Prediction - internal logic unchanged) ---
-@st.cache_data # Use cache_data for data loading
+# --- Helper Functions (Data, Model, Prediction) --- 
+@st.cache_data
 def load_and_clean_data(uploaded_file_content):
     try:
         df = pd.read_excel(io.BytesIO(uploaded_file_content), engine="openpyxl")
-        if df.shape[1] < 2: st.error("File must have at least two columns (Date, Level)."); return None
-        # More robust column finding
+        if df.shape[1] < 2: st.error("File must have at least Date and Level columns."); return None
+        
         date_col = next((col for col in df.columns if any(kw in str(col).lower() for kw in ["date", "time"]) and pd.api.types.is_datetime64_any_dtype(df[col])), 
                         next((col for col in df.columns if any(kw in str(col).lower() for kw in ["date", "time"]) ), None))
         level_col = next((col for col in df.columns if any(kw in str(col).lower() for kw in ["level", "groundwater", "gwl", "value"]) and pd.api.types.is_numeric_dtype(df[col])), 
                          next((col for col in df.columns if any(kw in str(col).lower() for kw in ["level", "groundwater", "gwl", "value"]) ), None))
         
-        if not date_col: st.error("Cannot find a suitable Date/Time column."); return None
-        if not level_col: st.error("Cannot find a suitable Level/Value column."); return None
+        if not date_col: st.error("Cannot find Date/Time column."); return None
+        if not level_col: st.error("Cannot find Level/Value column."); return None
         
-        st.success(f"Identified columns: Date='{date_col}', Level='{level_col}'. Renaming to 'Date' and 'Level'.")
+        st.success(f"Identified columns: Date='{date_col}', Level='{level_col}'.")
         df = df.rename(columns={date_col: "Date", level_col: "Level"})[["Date", "Level"]]
         
         df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
@@ -867,25 +794,24 @@ def load_and_clean_data(uploaded_file_content):
         
         initial_rows = len(df)
         df.dropna(subset=["Date", "Level"], inplace=True)
-        if len(df) < initial_rows: st.warning(f"Dropped {initial_rows - len(df)} rows with invalid/missing date or level values.")
-        if df.empty: st.error("No valid data remaining after cleaning."); return None
+        if len(df) < initial_rows: st.warning(f"Dropped {initial_rows - len(df)} rows with invalid data.")
+        if df.empty: st.error("No valid data remaining."); return None
         
         df = df.sort_values(by="Date").reset_index(drop=True)
-        # Check for duplicates after sorting
         if df.duplicated(subset=["Date"]).any():
             duplicates_count = df.duplicated(subset=["Date"]).sum()
-            st.warning(f"Found {duplicates_count} duplicate dates. Keeping the first occurrence.")
+            st.warning(f"Found {duplicates_count} duplicate dates. Keeping first occurrence.")
             df = df.drop_duplicates(subset=["Date"], keep="first")
             
         if df["Level"].isnull().any():
             missing_before = df["Level"].isnull().sum()
             df["Level"] = df["Level"].interpolate(method="linear", limit_direction="both")
-            st.warning(f"Filled {missing_before} missing level values using linear interpolation.")
-        if df["Level"].isnull().any(): st.error("Could not fill all missing values even after interpolation."); return None
+            st.warning(f"Filled {missing_before} missing level values using interpolation.")
+        if df["Level"].isnull().any(): st.error("Could not fill all missing values."); return None
         
-        st.success("Data loaded and cleaned successfully!")
+        st.success("Data loaded and cleaned!")
         return df
-    except Exception as e: st.error(f"An unexpected error occurred during data loading/cleaning: {e}"); return None
+    except Exception as e: st.error(f"Error loading/cleaning data: {e}"); return None
 
 def create_sequences(data, sequence_length):
     X, y = [], []
@@ -894,14 +820,14 @@ def create_sequences(data, sequence_length):
         y.append(data[i + sequence_length])
     return np.array(X), np.array(y)
 
-@st.cache_resource # Use cache_resource for models
+@st.cache_resource
 def load_keras_model_from_file(uploaded_file_obj, model_name_for_log):
     temp_model_path = f"temp_{model_name_for_log.replace(' ', '_')}.h5"
     try:
         with open(temp_model_path, "wb") as f: f.write(uploaded_file_obj.getbuffer())
         model = tf.keras.models.load_model(temp_model_path, compile=False)
         sequence_length = model.input_shape[1]
-        st.success(f"Loaded {model_name_for_log}. Inferred sequence length: {sequence_length}")
+        st.success(f"Loaded {model_name_for_log}. Sequence length: {sequence_length}")
         return model, sequence_length
     except Exception as e: st.error(f"Error loading Keras model {model_name_for_log}: {e}"); return None, None
     finally: 
@@ -916,7 +842,6 @@ def load_standard_model_cached(path):
     except Exception as e: st.error(f"Error loading standard Keras model from {path}: {e}"); return None, None
 
 def build_lstm_model(sequence_length, n_features=1):
-    # Internal function name remains, but user facing text should avoid "LSTM"
     model = Sequential([
         LSTM(40, activation="relu", input_shape=(sequence_length, n_features)), 
         Dropout(0.5), 
@@ -929,7 +854,6 @@ def predict_with_dropout_uncertainty(model, last_sequence_scaled, n_steps, n_ite
     all_predictions = []
     current_sequence = last_sequence_scaled.copy().reshape(1, model_sequence_length, 1)
     
-    # Ensure the prediction function is defined correctly
     @tf.function
     def predict_step_training_true(inp):
         return model(inp, training=True)
@@ -942,10 +866,8 @@ def predict_with_dropout_uncertainty(model, last_sequence_scaled, n_steps, n_ite
         iteration_predictions_scaled = []
         temp_sequence = current_sequence.copy()
         for _ in range(n_steps):
-            # Ensure input shape is correct for the model
             next_pred_scaled = predict_step_training_true(temp_sequence).numpy()[0,0]
             iteration_predictions_scaled.append(next_pred_scaled)
-            # Update the sequence correctly
             new_step = np.array([[next_pred_scaled]]).reshape(1, 1, 1)
             temp_sequence = np.append(temp_sequence[:, 1:, :], new_step, axis=1)
             
@@ -960,18 +882,14 @@ def predict_with_dropout_uncertainty(model, last_sequence_scaled, n_steps, n_ite
     mean_preds_scaled = np.mean(predictions_array_scaled, axis=0)
     std_devs_scaled = np.std(predictions_array_scaled, axis=0)
     
-    # Inverse transform
     mean_preds = scaler.inverse_transform(mean_preds_scaled.reshape(-1, 1)).flatten()
     
-    # Calculate bounds based on standard deviation
-    ci_multiplier = 1.96 # Standard 95% CI multiplier
+    ci_multiplier = 1.96
     lower_bound_scaled = mean_preds_scaled - ci_multiplier * std_devs_scaled
     upper_bound_scaled = mean_preds_scaled + ci_multiplier * std_devs_scaled
-    
     lower_bound = scaler.inverse_transform(lower_bound_scaled.reshape(-1, 1)).flatten()
     upper_bound = scaler.inverse_transform(upper_bound_scaled.reshape(-1, 1)).flatten()
     
-    # Ensure minimum uncertainty range (e.g., 5% of the mean prediction)
     min_uncertainty_percent = 0.05 
     for i in range(len(mean_preds)):
         if mean_preds[i] != 0:
@@ -980,9 +898,8 @@ def predict_with_dropout_uncertainty(model, last_sequence_scaled, n_steps, n_ite
             if current_half_range < min_uncertainty_value:
                 lower_bound[i] = mean_preds[i] - min_uncertainty_value
                 upper_bound[i] = mean_preds[i] + min_uncertainty_value
-        else: # Handle zero prediction case
-             # Assign a small absolute uncertainty if mean is zero
-             abs_uncertainty = 0.01 # Example small value
+        else:
+             abs_uncertainty = 0.01
              lower_bound[i] = -abs_uncertainty
              upper_bound[i] = abs_uncertainty
              
@@ -994,7 +911,6 @@ def calculate_metrics(y_true, y_pred):
     if len(y_true) == 0 or len(y_pred) == 0 or len(y_true) != len(y_pred):
         return {"RMSE": np.nan, "MAE": np.nan, "MAPE": np.nan}
     
-    # Ensure finite values for calculation
     mask = np.isfinite(y_true) & np.isfinite(y_pred)
     if not np.any(mask): return {"RMSE": np.nan, "MAE": np.nan, "MAPE": np.nan}
     y_true_clean, y_pred_clean = y_true[mask], y_pred[mask]
@@ -1003,176 +919,132 @@ def calculate_metrics(y_true, y_pred):
     rmse = np.sqrt(mean_squared_error(y_true_clean, y_pred_clean))
     mae = mean_absolute_error(y_true_clean, y_pred_clean)
     
-    # Calculate MAPE carefully, avoiding division by zero
     mape_mask = (y_true_clean != 0)
-    if np.any(mape_mask):
-        mape = mean_absolute_percentage_error(y_true_clean[mape_mask], y_pred_clean[mape_mask]) * 100
-    else:
-        mape = np.nan # Or 0, depending on desired interpretation when true values are zero
+    mape = mean_absolute_percentage_error(y_true_clean[mape_mask], y_pred_clean[mape_mask]) * 100 if np.any(mape_mask) else np.nan
         
     return {"RMSE": rmse, "MAE": mae, "MAPE": mape}
 
-# --- Plotting Functions (Updated title) ---
+# --- Plotting Functions --- 
 def create_forecast_plot(historical_df, forecast_df):
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=historical_df["Date"], y=historical_df["Level"], mode="lines", name="Historical Data", line=dict(color="rgb(31, 119, 180)")))
     fig.add_trace(go.Scatter(x=forecast_df["Date"], y=forecast_df["Forecast"], mode="lines", name="Forecast", line=dict(color="rgb(255, 127, 14)")))
-    # Ensure CI traces are added correctly for fill
     fig.add_trace(go.Scatter(x=forecast_df["Date"], y=forecast_df["Upper_CI"], mode="lines", name="Upper CI (95%)", line=dict(width=0), showlegend=False))
-    fig.add_trace(go.Scatter(x=forecast_df["Date"], y=forecast_df["Lower_CI"], mode="lines", name="Lower CI (95%)", line=dict(width=0), fillcolor="rgba(255, 127, 14, 0.2)", fill="tonexty", showlegend=True)) # Show legend for the filled area
-    # Updated Title: Replaced "LSTM Forecast" with "AI Forecast"
+    fig.add_trace(go.Scatter(x=forecast_df["Date"], y=forecast_df["Lower_CI"], mode="lines", name="Lower CI (95%)", line=dict(width=0), fillcolor="rgba(255, 127, 14, 0.2)", fill="tonexty", showlegend=True))
     fig.update_layout(title="Groundwater Level: Historical Data & AI Forecast", xaxis_title="Date", yaxis_title="Groundwater Level", hovermode="x unified", legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01), template="plotly_white")
     return fig
 
 def create_loss_plot(history_dict):
     if not history_dict or not isinstance(history_dict, dict) or "loss" not in history_dict or "val_loss" not in history_dict:
-        fig = go.Figure()
-        fig.update_layout(title="No Training History Available", xaxis_title="Epoch", yaxis_title="Loss")
-        fig.add_annotation(text="Training history is not available.",xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
+        fig = go.Figure().update_layout(title="No Training History Available", xaxis_title="Epoch", yaxis_title="Loss")
+        fig.add_annotation(text="Training history unavailable.",xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
         return fig
     history_df = pd.DataFrame(history_dict); history_df["Epoch"] = history_df.index + 1
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=history_df["Epoch"], y=history_df["loss"], mode="lines", name="Training Loss"))
     fig.add_trace(go.Scatter(x=history_df["Epoch"], y=history_df["val_loss"], mode="lines", name="Validation Loss"))
-    fig.update_layout(title="Model Training & Validation Loss Over Epochs", xaxis_title="Epoch", yaxis_title="Loss (MSE)", hovermode="x unified", template="plotly_white")
+    fig.update_layout(title="Model Training & Validation Loss", xaxis_title="Epoch", yaxis_title="Loss (MSE)", hovermode="x unified", template="plotly_white")
     return fig
 
-# --- Gemini API Functions (Ensure prompts avoid specific model terms) ---
+# --- Gemini API Functions --- 
 def generate_gemini_report(hist_df, forecast_df, metrics, language):
-    if not gemini_configured: return "AI report generation disabled. Configure Gemini API Key."
+    if not gemini_configured: return "AI report disabled. Configure Gemini API Key."
     if hist_df is None or forecast_df is None or metrics is None: return "Error: Insufficient data for AI report."
     try:
-        # Prompt already instructs to avoid technical details, verified.
-        prompt = f"""Act as a professional hydrologist analyzing groundwater level data. 
-        Provide a concise, insightful report in {language} based on the provided historical data, forecast results, and evaluation metrics. 
-        Focus on the trends, forecast reliability (mentioning confidence intervals), potential implications (e.g., water availability, drought/flood risk), and recommendations for monitoring or management. 
-        **IMPORTANT: Do NOT discuss the technical details of the forecasting model itself (e.g., specific architectures, parameters, training process). Focus solely on the data and the forecast outcomes.**
+        prompt = f"""Act as a professional hydrologist. Provide a concise report in {language} based on the historical data, forecast, and metrics. Focus on trends, forecast reliability (mentioning C.I.), implications, and recommendations. **IMPORTANT: Do NOT discuss technical model details (architecture, training). Focus on data and outcomes.**
 
-        Historical Data Summary:
-        {hist_df["Level"].describe().to_string()}
+Historical Summary:
+{hist_df["Level"].describe().to_string()}
 
-        Forecast Data Summary:
-        {forecast_df[["Forecast", "Lower_CI", "Upper_CI"]].describe().to_string()}
+Forecast Summary:
+{forecast_df[["Forecast", "Lower_CI", "Upper_CI"]].describe().to_string()}
 
-        Evaluation Metrics:
-        RMSE: {metrics.get('RMSE', 'N/A'):.4f}
-        MAE: {metrics.get('MAE', 'N/A'):.4f}
-        MAPE: {metrics.get('MAPE', 'N/A'):.2f}%
+Metrics:
+RMSE: {metrics.get('RMSE', 'N/A'):.4f}
+MAE: {metrics.get('MAE', 'N/A'):.4f}
+MAPE: {metrics.get('MAPE', 'N/A'):.2f}%
 
-        Generate the report:
-        """
+Generate the report:"""
         response = gemini_model_report.generate_content(prompt)
-        # Basic check for forbidden terms (can be improved)
         forbidden_terms = ["lstm", "long short-term memory", "epoch", "layer", "dropout", "adam optimizer", "sequence length"]
         cleaned_text = response.text
-        for term in forbidden_terms:
-            # Replace with a generic placeholder if accidentally included by the model
-            cleaned_text = cleaned_text.replace(term, "[modeling technique]") 
-            
+        for term in forbidden_terms: cleaned_text = cleaned_text.replace(term, "[modeling technique]")
         return cleaned_text
-    except Exception as e: st.error(f"Error generating AI report: {e}"); return f"Error generating AI report: {e}"
+    except Exception as e: st.error(f"Error generating AI report: {e}"); return f"Error: {e}"
 
 def get_gemini_chat_response(user_query, chat_hist, hist_df, forecast_df, metrics, ai_report):
     if not gemini_configured: return "AI chat disabled. Configure Gemini API Key."
     if hist_df is None or forecast_df is None or metrics is None: return "Error: Insufficient context for AI chat."
     try:
-        # Build context string - verified prompt avoids specific model terms.
         context_parts = [
-            "You are an AI assistant helping analyze groundwater forecast results.",
-            "**IMPORTANT: Do NOT discuss the technical details of the forecasting model (e.g., specific architectures). Focus on interpreting the data, forecast, and report.**",
-            "Historical Data Summary:", hist_df["Level"].describe().to_string(),
-            "Forecast Data Summary:", forecast_df[["Forecast", "Lower_CI", "Upper_CI"]].describe().to_string(),
-            f"Evaluation Metrics: RMSE={metrics.get('RMSE', 'N/A'):.4f}, MAE={metrics.get('MAE', 'N/A'):.4f}, MAPE={metrics.get('MAPE', 'N/A'):.2f}%",
-            "Generated AI Report:", ai_report if ai_report else "(Not generated yet)",
+            "You are an AI assistant analyzing groundwater forecast results.",
+            "**IMPORTANT: Do NOT discuss technical model details. Focus on interpreting data, forecast, and report.**",
+            "Historical Summary:", hist_df["Level"].describe().to_string(),
+            "Forecast Summary:", forecast_df[["Forecast", "Lower_CI", "Upper_CI"]].describe().to_string(),
+            f"Metrics: RMSE={metrics.get('RMSE', 'N/A'):.4f}, MAE={metrics.get('MAE', 'N/A'):.4f}, MAPE={metrics.get('MAPE', 'N/A'):.2f}%",
+            "AI Report:", ai_report if ai_report else "(Not generated)",
             "\nPrevious Conversation:"
         ]
-        for sender, message in chat_hist[-6:]: # Limit history length
-            context_parts.append(f"{sender}: {message}")
-        context_parts.append(f"User: {user_query}")
-        context_parts.append("AI:")
+        for sender, message in chat_hist[-6:]: context_parts.append(f"{sender}: {message}")
+        context_parts.append(f"User: {user_query}"); context_parts.append("AI:")
         context = "\n".join(context_parts)
         
         response = gemini_model_chat.generate_content(context)
-        
-        # Basic check for forbidden terms (can be improved)
         forbidden_terms = ["lstm", "long short-term memory", "epoch", "layer", "dropout", "adam optimizer", "sequence length"]
         cleaned_text = response.text
-        for term in forbidden_terms:
-             # Replace with a generic placeholder if accidentally included by the model
-            cleaned_text = cleaned_text.replace(term, "[modeling technique]")
-            
+        for term in forbidden_terms: cleaned_text = cleaned_text.replace(term, "[modeling technique]")
         return cleaned_text
-    except Exception as e: st.error(f"Error in AI chat: {e}"); return f"Error in AI chat: {e}"
+    except Exception as e: st.error(f"Error in AI chat: {e}"); return f"Error: {e}"
 
-# --- Main Forecasting Pipeline (internal logic unchanged, access checked before calling) ---
+# --- Main Forecasting Pipeline --- 
 def run_forecast_pipeline(df, model_choice, forecast_horizon, custom_model_file_obj, 
                         sequence_length_train_param, epochs_train_param, 
                         mc_iterations_param, use_custom_scaler_params_flag, custom_scaler_min_param, custom_scaler_max_param):
-    st.info(f"Starting forecast pipeline with model: {model_choice}")
-    model = None; history_data = None
-    model_sequence_length = sequence_length_train_param # Default if training
-    scaler_obj = MinMaxScaler(feature_range=(0, 1))
+    st.info(f"Starting forecast: {model_choice}")
+    model, history_data, scaler_obj = None, None, MinMaxScaler(feature_range=(0, 1))
+    model_sequence_length = sequence_length_train_param
     
     try:
         st.info("Step 1: Preparing Model...")
-        # Load or define model
         if model_choice == "Standard Pre-trained Model":
             if os.path.exists(STANDARD_MODEL_PATH):
                 model, model_sequence_length = load_standard_model_cached(STANDARD_MODEL_PATH)
-                if model is None: return None, None, None, None # Error handled in cached function
-            else:
-                st.error(f"Standard model not found at {STANDARD_MODEL_PATH}."); return None, None, None, None
-        elif model_choice == "Upload Custom .h5 Model" and custom_model_file_obj is not None:
+                if model is None: return None, None, None, None
+            else: st.error(f"Standard model not found: {STANDARD_MODEL_PATH}."); return None, None, None, None
+        elif model_choice == "Upload Custom .h5 Model" and custom_model_file_obj:
             model, model_sequence_length = load_keras_model_from_file(custom_model_file_obj, "Custom Model")
-            if model is None: return None, None, None, None # Error handled in load function
-        elif model_choice == "Train New Model":
-            model_sequence_length = sequence_length_train_param # Use user-defined length
-            # Model will be built later during training step
-        else:
+            if model is None: return None, None, None, None
+        elif model_choice != "Train New Model":
             st.error("Invalid model choice or missing file."); return None, None, None, None
         
-        # Store the determined sequence length
         st.session_state.model_sequence_length = model_sequence_length
-        st.info(f"Model prep complete. Sequence length to use: {model_sequence_length}")
+        st.info(f"Model ready. Sequence length: {model_sequence_length}")
 
         st.info("Step 2: Preprocessing Data (Scaling)...")
-        # Scale data
         if use_custom_scaler_params_flag and custom_scaler_min_param is not None and custom_scaler_max_param is not None and custom_scaler_min_param < custom_scaler_max_param:
-            # Use custom scaler parameters if provided and valid
             scaler_obj.fit(np.array([[custom_scaler_min_param], [custom_scaler_max_param]]))
             scaled_data = scaler_obj.transform(df["Level"].values.reshape(-1, 1))
             st.info(f"Using custom scaler: min={custom_scaler_min_param}, max={custom_scaler_max_param}")
         else:
-            # Fit scaler to the current data
             scaled_data = scaler_obj.fit_transform(df["Level"].values.reshape(-1, 1))
             st.info(f"Using fitted scaler: min={scaler_obj.data_min_[0]:.4f}, max={scaler_obj.data_max_[0]:.4f}")
-            
-        st.info("Data scaling complete.")
+        st.info("Scaling complete.")
 
         st.info(f"Step 3: Creating sequences (length {model_sequence_length})...")
-        # Create sequences
-        if len(df) <= model_sequence_length:
-            st.error(f"Not enough data ({len(df)} rows) for the required sequence length ({model_sequence_length})."); return None, None, None, None
+        if len(df) <= model_sequence_length: st.error(f"Not enough data ({len(df)} rows) for sequence length ({model_sequence_length})."); return None, None, None, None
         X, y = create_sequences(scaled_data, model_sequence_length)
-        if len(X) == 0:
-            st.error("Could not create sequences from the data."); return None, None, None, None
+        if len(X) == 0: st.error("Could not create sequences."); return None, None, None, None
         st.info(f"Sequences created: {len(X)}")
 
         evaluation_metrics = {"RMSE": np.nan, "MAE": np.nan, "MAPE": np.nan}
         if model_choice == "Train New Model":
             st.info(f"Step 4a: Training New Model (Epochs: {epochs_train_param})...")
-            # Train model
             X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, shuffle=False)
-            if len(X_train) == 0 or len(X_val) == 0:
-                st.error("Not enough data for train/validation split after creating sequences."); return None, None, None, None
+            if len(X_train) == 0 or len(X_val) == 0: st.error("Not enough data for train/validation split."); return None, None, None, None
             
-            # Use internal function name, user doesn't see this
-            model = build_lstm_model(model_sequence_length) 
+            model = build_lstm_model(model_sequence_length)
             early_stopping = EarlyStopping(monitor="val_loss", patience=10, restore_best_weights=True)
-            
-            # Use a Streamlit progress bar for training feedback
-            train_progress = st.progress(0)
-            status_text_train = st.empty()
+            train_progress = st.progress(0); status_text_train = st.empty()
             class ProgressCallback(tf.keras.callbacks.Callback):
                 def on_epoch_end(self, epoch, logs=None):
                     progress = (epoch + 1) / epochs_train_param
@@ -1184,7 +1056,7 @@ def run_forecast_pipeline(df, model_choice, forecast_horizon, custom_model_file_
             train_progress.empty(); status_text_train.empty()
             st.success("Training complete.")
             
-            st.info("Evaluating trained model on validation set...")
+            st.info("Evaluating trained model...")
             val_predictions_scaled = model.predict(X_val)
             val_predictions = scaler_obj.inverse_transform(val_predictions_scaled)
             y_val_actual = scaler_obj.inverse_transform(y_val)
@@ -1192,9 +1064,8 @@ def run_forecast_pipeline(df, model_choice, forecast_horizon, custom_model_file_
             st.success("Evaluation complete.")
         else: # Pre-trained model evaluation
             st.info("Step 4b: Evaluating Pre-trained Model (Pseudo-Validation)...")
-            # Evaluate pre-trained model (using last 20% as pseudo-validation)
-            if len(X) > 5: # Need at least a few sequences
-                val_split_idx = max(1, int(len(X) * 0.8)) # Ensure at least 1 validation sample if possible
+            if len(X) > 5:
+                val_split_idx = max(1, int(len(X) * 0.8))
                 X_val_pseudo, y_val_pseudo = X[val_split_idx:], y[val_split_idx:]
                 if len(X_val_pseudo) > 0:
                     val_predictions_scaled = model.predict(X_val_pseudo)
@@ -1202,46 +1073,36 @@ def run_forecast_pipeline(df, model_choice, forecast_horizon, custom_model_file_
                     y_val_actual = scaler_obj.inverse_transform(y_val_pseudo)
                     evaluation_metrics = calculate_metrics(y_val_actual, val_predictions)
                     st.success("Pseudo-evaluation complete.")
-                else:
-                    st.warning("Not enough data for pseudo-validation split.")
-            else:
-                st.warning("Not enough sequences for pseudo-validation.")
+                else: st.warning("Not enough data for pseudo-validation.")
+            else: st.warning("Not enough sequences for pseudo-validation.")
 
-        st.info(f"Step 5: Forecasting {forecast_horizon} Steps (MC Dropout Iterations: {mc_iterations_param})...")
-        # Forecast future steps
+        st.info(f"Step 5: Forecasting {forecast_horizon} Steps (MC Dropout: {mc_iterations_param})...")
         last_sequence_scaled_for_pred = scaled_data[-model_sequence_length:]
         mean_forecast, lower_bound, upper_bound = predict_with_dropout_uncertainty(
             model, last_sequence_scaled_for_pred, forecast_horizon, mc_iterations_param, scaler_obj, model_sequence_length
         )
         st.success("Forecasting complete.")
 
-        # Create forecast DataFrame
         last_date = df["Date"].iloc[-1]
-        try: 
-            freq = pd.infer_freq(df["Date"].dropna())
-            freq = freq if freq else "D" # Default to daily if inference fails
-        except Exception: 
-            freq = "D"
-        try: 
-            # Ensure frequency is valid for date_range
-            date_offset = pd.tseries.frequencies.to_offset(freq)
+        try: freq = pd.infer_freq(df["Date"].dropna()) or "D"
+        except Exception: freq = "D"
+        try: date_offset = pd.tseries.frequencies.to_offset(freq)
         except ValueError: 
-            st.warning(f"Inferred frequency '{freq}' invalid. Defaulting to daily ('D').")
-            date_offset = pd.DateOffset(days=1)
-            freq = 'D'
+            st.warning(f"Invalid frequency '{freq}'. Defaulting to daily ('D').")
+            date_offset = pd.DateOffset(days=1); freq = 'D'
             
         forecast_dates = pd.date_range(start=last_date + date_offset, periods=forecast_horizon, freq=freq)
         forecast_df = pd.DataFrame({"Date": forecast_dates, "Forecast": mean_forecast, "Lower_CI": lower_bound, "Upper_CI": upper_bound})
         
-        st.info("Forecast pipeline finished successfully.")
+        st.info("Forecast pipeline finished.")
         return forecast_df, evaluation_metrics, history_data, scaler_obj
 
     except Exception as e:
-        st.error(f"An error occurred in the forecast pipeline: {e}")
-        import traceback; st.error(traceback.format_exc()) # Show full traceback for debugging
+        st.error(f"Error in forecast pipeline: {e}")
+        import traceback; st.error(traceback.format_exc())
         return None, None, None, None
 
-# --- Initialize Session State (Add new keys for Google Auth) ---
+# --- Initialize Session State --- 
 def initialize_session_state():
     defaults = {
         "cleaned_data": None, "forecast_results": None, "evaluation_metrics": None, 
@@ -1251,59 +1112,46 @@ def initialize_session_state():
         "chat_active": False, "model_sequence_length": STANDARD_MODEL_SEQUENCE_LENGTH, 
         "run_forecast_triggered": False, "about_us_expanded": False,
         "persistent_user_id": None, "user_profile": None, 
-        "google_auth_status": False, # New key for Google Auth status
-        "google_user_info": None,   # New key for Google user details
-        "google_auth_callback": None, # Key for component callback
-        "admin_authenticated": False, "session_visit_logged": False,
-        "user_agent": None
+        "google_auth_status": False, "google_user_info": None,
+        "google_auth_callback": None, "admin_authenticated": False, 
+        "session_visit_logged": False, "user_agent": None
     }
     for key, default_value in defaults.items():
-        if key not in st.session_state:
-            st.session_state[key] = default_value
+        if key not in st.session_state: st.session_state[key] = default_value
 
-initialize_session_state() # Call the initialization function
+initialize_session_state()
 
 # --- Sidebar --- 
 with st.sidebar:
     st.title("DeepHydro AI")
     
-    # --- Display User Info / Logout --- (Step 5)
+    # User Info / Logout
     if st.session_state.google_auth_status and st.session_state.google_user_info:
         user_info = st.session_state.google_user_info
-        st.markdown("---**User**---") # Separator
-        st.markdown(f"""
-        <div class="user-info-container">
-            <img src="{user_info.get('picture', '')}" alt="Profile Pic">
+        st.markdown("---**User**---")
+        st.markdown(f"""<div class="user-info-container">
+            <img src="{user_info.get('picture', '')}" alt="Pic">
             <span>{user_info.get('email', 'Logged In')}</span>
-        </div>
-        """, unsafe_allow_html=True)
+        </div>""", unsafe_allow_html=True)
         if st.button("Logout", key="google_logout_btn", use_container_width=True):
-            # Reset Google auth state
             st.session_state.google_auth_status = False
             st.session_state.google_user_info = None
-            st.session_state.persistent_user_id = None # Reset persistent ID to trigger re-hashing
-            st.session_state.user_profile = None # Clear profile
-            st.session_state.google_auth_callback = None # Clear callback value
+            st.session_state.persistent_user_id = None
+            st.session_state.user_profile = None
+            st.session_state.google_auth_callback = None
             if firebase_initialized: log_visitor_activity("Sidebar", "logout")
-            st.success("Logged out.")
-            time.sleep(1) 
-            st.rerun()
-        st.markdown("------------") # Separator
+            st.success("Logged out."); time.sleep(1); st.rerun()
+        st.markdown("------------")
     
-    # Log sidebar view activity
-    if firebase_initialized:
-        log_visitor_activity("Sidebar", "view")
+    if firebase_initialized: log_visitor_activity("Sidebar", "view")
     
     st.header("1. Upload Data")
-    uploaded_data_file = st.file_uploader("Choose an XLSX data file", type="xlsx", key="data_uploader")
+    uploaded_data_file = st.file_uploader("Choose XLSX data file", type="xlsx", key="data_uploader")
     
-    # Logging for upload handled later
-
     st.header("2. Model & Forecast")
     model_choice = st.selectbox("Model Type", ("Standard Pre-trained Model", "Train New Model", "Upload Custom .h5 Model"), key="model_select")
     
     if firebase_initialized:
-        # Log model selection change
         if 'last_model_choice' not in st.session_state or st.session_state.last_model_choice != model_choice:
              log_visitor_activity("Sidebar", "select_model", feature_used=model_choice)
              st.session_state.last_model_choice = model_choice
@@ -1311,7 +1159,6 @@ with st.sidebar:
     custom_model_file_obj_sidebar = None
     custom_scaler_min_sidebar, custom_scaler_max_sidebar = None, None
     use_custom_scaler_sidebar = False
-    # Use the sequence length stored in session state if available, else default
     default_sequence_length = st.session_state.get("model_sequence_length", STANDARD_MODEL_SEQUENCE_LENGTH)
     sequence_length_train_sidebar = default_sequence_length
     epochs_train_sidebar = 50
@@ -1320,52 +1167,45 @@ with st.sidebar:
         custom_model_file_obj_sidebar = st.file_uploader("Upload .h5 model", type="h5", key="custom_h5_uploader")
         use_custom_scaler_sidebar = st.checkbox("Provide custom scaler params?", value=False, key="use_custom_scaler_cb")
         if use_custom_scaler_sidebar:
-            st.markdown("Enter **original min/max** values model was scaled with:")
+            st.markdown("Enter **original min/max** values:")
             custom_scaler_min_sidebar = st.number_input("Original Min", value=0.0, format="%.4f", key="custom_scaler_min_in")
             custom_scaler_max_sidebar = st.number_input("Original Max", value=1.0, format="%.4f", key="custom_scaler_max_in")
     elif model_choice == "Standard Pre-trained Model":
         st.info(f"Using standard model (Seq Len: {default_sequence_length})")
         use_custom_scaler_sidebar = st.checkbox("Provide custom scaler params?", value=False, key="use_std_scaler_cb")
         if use_custom_scaler_sidebar:
-            st.markdown("Enter **original min/max** values standard model was scaled with:")
+            st.markdown("Enter **original min/max** values:")
             custom_scaler_min_sidebar = st.number_input("Original Min", value=0.0, format="%.4f", key="std_scaler_min_in")
             custom_scaler_max_sidebar = st.number_input("Original Max", value=1.0, format="%.4f", key="std_scaler_max_in")
     elif model_choice == "Train New Model":
         try:
-            # Updated Label: Replaced "LSTM Sequence Length" with "Model Sequence Length"
             sequence_length_train_sidebar = st.number_input("Model Sequence Length", min_value=10, max_value=365, value=default_sequence_length, step=10, key="seq_len_train_in")
         except Exception as e:
-            st.warning(f"Using default sequence length {default_sequence_length} due to: {e}")
+            st.warning(f"Using default sequence length {default_sequence_length}: {e}")
             sequence_length_train_sidebar = default_sequence_length
         epochs_train_sidebar = st.number_input("Training Epochs", min_value=10, max_value=500, value=50, step=10, key="epochs_train_in")
 
     mc_iterations_sidebar = st.number_input("MC Dropout Iterations (C.I.)", min_value=20, max_value=500, value=100, step=10, key="mc_iter_in")
     forecast_horizon_sidebar = st.number_input("Forecast Horizon (steps)", min_value=1, max_value=100, value=12, step=1, key="horizon_in")
 
-    # --- Run Forecast Button with Access Check --- 
+    # Run Forecast Button
     run_forecast_button = st.button("Run Forecast", key="run_forecast_main_btn", use_container_width=True)
-    
     if run_forecast_button:
         access_granted, message = check_feature_access()
         if access_granted:
             st.session_state.run_forecast_triggered = True
             if st.session_state.cleaned_data is not None:
-                if model_choice == "Upload Custom .h5 Model" and custom_model_file_obj_sidebar is None:
+                if model_choice == "Upload Custom .h5 Model" and not custom_model_file_obj_sidebar:
                     st.error("Please upload a custom .h5 model file.")
                     st.session_state.run_forecast_triggered = False
                 else:
-                    # Log successful access/usage *before* running the potentially long process
-                    if firebase_initialized:
-                        log_visitor_activity("Sidebar", "run_forecast", feature_used='Forecast')
-                        
+                    if firebase_initialized: log_visitor_activity("Sidebar", "run_forecast", feature_used='Forecast')
                     with st.spinner(f"Running forecast ({model_choice})..."):
-                        # Pass sidebar values to the pipeline
                         forecast_df, metrics, history, scaler_obj = run_forecast_pipeline(
                             st.session_state.cleaned_data, model_choice, forecast_horizon_sidebar, 
                             custom_model_file_obj_sidebar, sequence_length_train_sidebar, epochs_train_sidebar, 
                             mc_iterations_sidebar, use_custom_scaler_sidebar, custom_scaler_min_sidebar, custom_scaler_max_sidebar
                         )
-                    # Store results in session state
                     st.session_state.forecast_results = forecast_df
                     st.session_state.evaluation_metrics = metrics
                     st.session_state.training_history = history
@@ -1374,40 +1214,31 @@ with st.sidebar:
                     if forecast_df is not None and metrics is not None:
                         st.session_state.forecast_plot_fig = create_forecast_plot(st.session_state.cleaned_data, forecast_df)
                         st.success("Forecast complete! Results updated.")
-                        # Reset downstream results
                         st.session_state.ai_report = None; st.session_state.chat_history = []; st.session_state.chat_active = False
-                        st.session_state.active_tab = 1 # Switch to forecast tab
+                        st.session_state.active_tab = 1
                         st.rerun()
                     else:
-                        st.error("Forecast pipeline failed. Check messages above.")
-                        # Clear potentially inconsistent results
+                        st.error("Forecast pipeline failed. Check messages.")
                         st.session_state.forecast_results = None; st.session_state.evaluation_metrics = None
                         st.session_state.training_history = None; st.session_state.forecast_plot_fig = None
             else:
                 st.error("Please upload data first.")
                 st.session_state.run_forecast_triggered = False
         else:
-            # If access denied, show Google login prompt
-            show_google_login_button() # Use the new function
-            # Log denied access attempt
-            if firebase_initialized:
-                 log_visitor_activity("Sidebar", "run_forecast_denied", feature_used='Forecast')
+            show_google_login_button()
+            if firebase_initialized: log_visitor_activity("Sidebar", "run_forecast_denied", feature_used='Forecast')
 
     st.header("3. AI Analysis")
     st.session_state.report_language = st.selectbox("Report Language", ["English", "French"], key="report_lang_select", disabled=not gemini_configured)
     
-    # --- Generate AI Report Button with Access Check --- 
+    # Generate AI Report Button
     generate_report_button = st.button("Generate AI Report", key="show_report_btn", disabled=not gemini_configured, use_container_width=True)
-    
     if generate_report_button:
         access_granted, message = check_feature_access()
         if access_granted:
             if not gemini_configured: st.error("AI Report disabled. Configure Gemini API Key.")
             elif st.session_state.cleaned_data is not None and st.session_state.forecast_results is not None and st.session_state.evaluation_metrics is not None:
-                # Log successful access/usage
-                if firebase_initialized:
-                    log_visitor_activity("Sidebar", "generate_report", feature_used='AI Report')
-                    
+                if firebase_initialized: log_visitor_activity("Sidebar", "generate_report", feature_used='AI Report')
                 with st.spinner(f"Generating AI report ({st.session_state.report_language})..."):
                     st.session_state.ai_report = generate_gemini_report(
                         st.session_state.cleaned_data, st.session_state.forecast_results,
@@ -1415,60 +1246,43 @@ with st.sidebar:
                     )
                 if st.session_state.ai_report and not st.session_state.ai_report.startswith("Error:"):
                     st.success("AI report generated.")
-                    st.session_state.active_tab = 3 # Switch to AI report tab
+                    st.session_state.active_tab = 3
                     st.rerun()
-                else: 
-                    st.error(f"Failed to generate AI report. {st.session_state.ai_report}")
-            else: 
-                st.error("Data, forecast, and metrics needed. Run forecast first.")
+                else: st.error(f"Failed to generate AI report. {st.session_state.ai_report}")
+            else: st.error("Data, forecast, and metrics needed. Run forecast first.")
         else:
-            show_google_login_button() # Use the new function
-            if firebase_initialized:
-                 log_visitor_activity("Sidebar", "generate_report_denied", feature_used='AI Report')
+            show_google_login_button()
+            if firebase_initialized: log_visitor_activity("Sidebar", "generate_report_denied", feature_used='AI Report')
 
-    # --- Download PDF Button (No usage limit) --- 
+    # Download PDF Button
     if st.button("Download Report (PDF)", key="download_report_btn", use_container_width=True):
-        if firebase_initialized:
-            log_visitor_activity("Sidebar", "download_pdf") # Log attempt
-            
+        if firebase_initialized: log_visitor_activity("Sidebar", "download_pdf")
         if st.session_state.forecast_results is not None and st.session_state.evaluation_metrics is not None and st.session_state.ai_report is not None and st.session_state.forecast_plot_fig is not None:
             with st.spinner("Generating PDF report..."):
-                # ... [Existing PDF generation logic unchanged] ...
                 try:
                     pdf = FPDF(); pdf.add_page()
-                    # Try to add DejaVu font for better Unicode support
                     font_path_dejavu = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-                    report_font = "Arial" # Default font
+                    report_font = "Arial"
                     if os.path.exists(font_path_dejavu):
-                        try: 
-                            pdf.add_font("DejaVu", fname=font_path_dejavu, uni=True)
-                            report_font = "DejaVu"
-                        except RuntimeError as font_err:
-                            st.warning(f"Failed to add DejaVu font ({font_err}), using Arial.")
-                    else:
-                        st.warning(f"DejaVu font not found at {font_path_dejavu}, using Arial.")
+                        try: pdf.add_font("DejaVu", fname=font_path_dejavu, uni=True); report_font = "DejaVu"
+                        except RuntimeError as font_err: st.warning(f"Failed to add DejaVu font ({font_err}), using Arial.")
+                    else: st.warning(f"DejaVu font not found at {font_path_dejavu}, using Arial.")
                         
                     pdf.set_font(report_font, size=12); pdf.cell(0, 10, txt="DeepHydro AI Forecasting Report", new_x="LMARGIN", new_y="NEXT", align="C"); pdf.ln(5)
                     
-                    # Embed plot image
                     plot_filename = "forecast_plot.png"
                     try:
-                        # Ensure figure exists before writing
                         if st.session_state.forecast_plot_fig:
                             st.session_state.forecast_plot_fig.write_image(plot_filename, scale=2)
                             pdf.image(plot_filename, x=pdf.get_x(), y=pdf.get_y(), w=190)
-                            pdf.ln(125) # Adjust spacing based on image height
-                        else:
-                            pdf.cell(0, 10, txt="[Forecast plot not available]", new_x="LMARGIN", new_y="NEXT")
-                            pdf.ln(5)
+                            pdf.ln(125)
+                        else: pdf.cell(0, 10, txt="[Forecast plot unavailable]", new_x="LMARGIN", new_y="NEXT"); pdf.ln(5)
                     except Exception as img_err:
                         st.warning(f"Could not embed plot image: {img_err}.")
-                        pdf.cell(0, 10, txt=f"[Error embedding plot: {img_err}]", new_x="LMARGIN", new_y="NEXT")
-                        pdf.ln(5)
+                        pdf.cell(0, 10, txt=f"[Error embedding plot: {img_err}]", new_x="LMARGIN", new_y="NEXT"); pdf.ln(5)
                     finally: 
                         if os.path.exists(plot_filename): os.remove(plot_filename)
                         
-                    # Add Metrics
                     pdf.set_font(report_font, "B", size=11); pdf.cell(0, 10, txt="Model Evaluation Metrics", new_x="LMARGIN", new_y="NEXT"); pdf.ln(1)
                     pdf.set_font(report_font, size=10)
                     for key, value in st.session_state.evaluation_metrics.items():
@@ -1476,12 +1290,9 @@ with st.sidebar:
                         pdf.cell(0, 8, txt=f"{key}: {val_str}", new_x="LMARGIN", new_y="NEXT")
                     pdf.ln(5)
                     
-                    # Add Forecast Data Table
                     pdf.set_font(report_font, "B", size=11); pdf.cell(0, 10, txt="Forecast Data (First 10 rows)", new_x="LMARGIN", new_y="NEXT"); pdf.ln(1)
-                    pdf.set_font(report_font, size=8); col_widths = [35, 35, 35, 35] # Adjust widths as needed
-                    # Header
+                    pdf.set_font(report_font, size=8); col_widths = [35, 35, 35, 35]
                     pdf.cell(col_widths[0], 7, txt="Date", border=1); pdf.cell(col_widths[1], 7, txt="Forecast", border=1); pdf.cell(col_widths[2], 7, txt="Lower CI", border=1); pdf.cell(col_widths[3], 7, txt="Upper CI", border=1, new_x="LMARGIN", new_y="NEXT")
-                    # Data rows
                     for _, row in st.session_state.forecast_results.head(10).iterrows():
                         pdf.cell(col_widths[0], 6, txt=str(row["Date"].date()), border=1)
                         pdf.cell(col_widths[1], 6, txt=f"{row['Forecast']:.2f}", border=1)
@@ -1489,124 +1300,97 @@ with st.sidebar:
                         pdf.cell(col_widths[3], 6, txt=f"{row['Upper_CI']:.2f}", border=1, new_x="LMARGIN", new_y="NEXT")
                     pdf.ln(5)
                     
-                    # Add AI Report Text
                     pdf.set_font(report_font, "B", size=11); pdf.cell(0, 10, txt=f"AI Report ({st.session_state.report_language})", new_x="LMARGIN", new_y="NEXT"); pdf.ln(1)
                     pdf.set_font(report_font, size=10)
-                    # Use multi_cell for potentially long text
                     pdf.multi_cell(0, 5, txt=st.session_state.ai_report)
                     pdf.ln(5)
                     
-                    # Output PDF
-                    pdf_output_bytes = pdf.output(dest="S").encode("latin-1") # Use latin-1 for FPDF output
-                    
-                    st.download_button(
-                        label="Download PDF Now", 
-                        data=pdf_output_bytes, 
-                        file_name="deephydro_forecast_report.pdf", 
-                        mime="application/pdf", # Correct MIME type
-                        key="pdf_download_final_btn", 
-                        use_container_width=True
-                    )
-                    st.success("PDF ready. Click download button above.")
+                    pdf_output_bytes = pdf.output(dest="S").encode("latin-1")
+                    st.download_button(label="Download PDF Now", data=pdf_output_bytes, file_name="deephydro_forecast_report.pdf", mime="application/pdf", key="pdf_download_final_btn", use_container_width=True)
+                    st.success("PDF ready. Click download button.")
                     if firebase_initialized: log_visitor_activity("Sidebar", "download_pdf_success")
                 except Exception as pdf_err:
                     st.error(f"Failed to generate PDF: {pdf_err}")
-                    import traceback; st.error(traceback.format_exc()) # Show traceback
+                    import traceback; st.error(traceback.format_exc())
                     if firebase_initialized: log_visitor_activity("Sidebar", "download_pdf_failure")
-        else:
-            st.error("Required data missing. Run forecast and generate AI report first.")
+        else: st.error("Required data missing. Run forecast and generate AI report first.")
 
     st.header("4. AI Assistant")
-    # --- Activate Chat Button with Access Check --- 
+    # Activate Chat Button
     chat_button_label = "Deactivate Chat" if st.session_state.chat_active else "Activate Chat"
     activate_chat_button = st.button(chat_button_label, key="chat_ai_btn", disabled=not gemini_configured, use_container_width=True)
-    
     if activate_chat_button:
-        if st.session_state.chat_active: # Deactivating
-            st.session_state.chat_active = False
-            st.session_state.chat_history = [] # Clear history on deactivate
+        if st.session_state.chat_active:
+            st.session_state.chat_active = False; st.session_state.chat_history = []
             if firebase_initialized: log_visitor_activity("Sidebar", "deactivate_chat")
             st.rerun()
-        else: # Activating
+        else:
             access_granted, message = check_feature_access()
             if access_granted:
-                st.session_state.chat_active = True
-                st.session_state.active_tab = 4 # Switch to chat tab
-                # Log successful access/usage for activating chat
-                if firebase_initialized:
-                    log_visitor_activity("Sidebar", "activate_chat", feature_used='AI Chat')
+                st.session_state.chat_active = True; st.session_state.active_tab = 4
+                if firebase_initialized: log_visitor_activity("Sidebar", "activate_chat", feature_used='AI Chat')
                 st.rerun()
             else:
-                show_google_login_button() # Use the new function
-                if firebase_initialized:
-                     log_visitor_activity("Sidebar", "activate_chat_denied", feature_used='AI Chat')
+                show_google_login_button()
+                if firebase_initialized: log_visitor_activity("Sidebar", "activate_chat_denied", feature_used='AI Chat')
 
-    # --- About Us (unchanged) ---
+    # About Us
     st.markdown('<div class="about-us-header">👥 About Us</div>', unsafe_allow_html=True)
     st.markdown('<div class="about-us-content">', unsafe_allow_html=True)
-    # Updated Text: Replaced "using AI" with more general phrasing if needed, but it's already general.
     st.markdown("Specializing in groundwater forecasting using AI.") 
     st.markdown("**Contact:** [deephydro@example.com](mailto:deephydro@example.com)")
     st.markdown("© 2025 DeepHydro AI Team")
     st.markdown('</div>', unsafe_allow_html=True)
     
-    # --- Admin Analytics Access (unchanged) ---
+    # Admin Access
     st.header("5. Admin")
     if st.button("Analytics Dashboard", key="admin_analytics_btn", use_container_width=True):
         if firebase_initialized: log_visitor_activity("Sidebar", "access_admin")
-        st.session_state.active_tab = 5 # Switch to admin tab
+        st.session_state.active_tab = 5
         st.rerun()
 
 # --- Main Application Area --- 
 st.title("DeepHydro AI Forecasting")
+if firebase_initialized: log_visitor_activity("Main Page", "view")
 
-# Log main page view activity
-if firebase_initialized:
-    log_visitor_activity("Main Page", "view")
-
-# App Introduction (Updated Text)
+# App Introduction
 st.markdown('<div class="app-intro">', unsafe_allow_html=True)
-st.markdown("""
-### Welcome to DeepHydro AI Forecasting
+st.markdown("""### Welcome to DeepHydro AI Forecasting
 Advanced groundwater forecasting platform using deep learning.
 **Features:** AI forecasting, MC Dropout uncertainty, AI interpretation, Interactive visualization.
-Upload your data to begin.
-""")
+Upload your data to begin.""")
 st.markdown('</div>', unsafe_allow_html=True)
 
-# Handle data upload and cleaning
+# Handle data upload
 if uploaded_data_file is not None:
-    # Process only if the file is new
     if st.session_state.get("uploaded_data_filename") != uploaded_data_file.name:
         st.session_state.uploaded_data_filename = uploaded_data_file.name
         with st.spinner("Loading and cleaning data..."): 
             cleaned_df_result = load_and_clean_data(uploaded_data_file.getvalue())
         if cleaned_df_result is not None:
             st.session_state.cleaned_data = cleaned_df_result
-            # Reset results on new data upload
+            # Reset results
             st.session_state.forecast_results = None; st.session_state.evaluation_metrics = None
             st.session_state.training_history = None; st.session_state.ai_report = None
             st.session_state.chat_history = []; st.session_state.scaler_object = None
             st.session_state.forecast_plot_fig = None
-            st.session_state.model_sequence_length = STANDARD_MODEL_SEQUENCE_LENGTH # Reset sequence length
+            st.session_state.model_sequence_length = STANDARD_MODEL_SEQUENCE_LENGTH
             st.session_state.run_forecast_triggered = False
             if firebase_initialized: log_visitor_activity("Data Upload", "upload_success")
-            st.rerun() # Rerun to update UI after successful upload
+            st.rerun()
         else:
-            st.session_state.cleaned_data = None # Ensure cleaned_data is None on failure
+            st.session_state.cleaned_data = None
             st.error("Data loading failed. Check file format/content.")
             if firebase_initialized: log_visitor_activity("Data Upload", "upload_failure")
 
 # Define tabs
 tab_titles = ["Data Preview", "Forecast Results", "Model Evaluation", "AI Report", "AI Chatbot", "Admin Analytics"]
 tabs = st.tabs(tab_titles)
-
-# Set active tab (default to 0 if state is None)
 active_tab_index = st.session_state.get("active_tab", 0)
 
 # --- Tab Content --- 
 
-# Data Preview Tab (No usage limit)
+# Data Preview Tab
 with tabs[0]:
     if firebase_initialized: log_visitor_activity("Tab: Data Preview", "view")
     st.header("Uploaded & Cleaned Data Preview")
@@ -1623,20 +1407,19 @@ with tabs[0]:
     else:
         st.info("⬆️ Upload XLSX data using the sidebar.")
 
-# Forecast Results Tab (Content shown only if forecast ran successfully - access checked in sidebar)
+# Forecast Results Tab
 with tabs[1]:
     if firebase_initialized: log_visitor_activity("Tab: Forecast Results", "view")
     st.header("Forecast Results")
     if st.session_state.forecast_results is not None and isinstance(st.session_state.forecast_results, pd.DataFrame) and not st.session_state.forecast_results.empty:
-        if st.session_state.forecast_plot_fig is not None:
-            st.plotly_chart(st.session_state.forecast_plot_fig, use_container_width=True)
+        if st.session_state.forecast_plot_fig: st.plotly_chart(st.session_state.forecast_plot_fig, use_container_width=True)
         else: st.warning("Forecast plot unavailable.")
         st.subheader("Forecast Data Table")
         st.dataframe(st.session_state.forecast_results, use_container_width=True)
-    elif st.session_state.run_forecast_triggered: st.warning("Forecast run attempted, but no results available. Check sidebar messages.")
+    elif st.session_state.run_forecast_triggered: st.warning("Forecast run attempted, but no results available.")
     else: st.info("Run a forecast (sidebar) to see results.")
 
-# Model Evaluation Tab (Content shown only if forecast ran successfully)
+# Model Evaluation Tab
 with tabs[2]:
     if firebase_initialized: log_visitor_activity("Tab: Model Evaluation", "view")
     st.header("Model Evaluation")
@@ -1655,17 +1438,16 @@ with tabs[2]:
     elif st.session_state.run_forecast_triggered: st.warning("Forecast run attempted, but no evaluation metrics available.")
     else: st.info("Run a forecast (sidebar) to see evaluation.")
 
-# AI Report Tab (Content shown only if report generated - access checked in sidebar)
+# AI Report Tab
 with tabs[3]:
     if firebase_initialized: log_visitor_activity("Tab: AI Report", "view")
     st.header("AI-Generated Scientific Report")
     if not gemini_configured: st.warning("AI features disabled. Configure Gemini API Key.")
     if st.session_state.ai_report: 
-        # Use markdown with class for styling and copy functionality
         st.markdown(f'<div class="chat-message ai-message">{st.session_state.ai_report}<span class="copy-tooltip">Copied!</span></div>', unsafe_allow_html=True)
     else: st.info("Click 'Generate AI Report' (sidebar) after a forecast.")
 
-# AI Chatbot Tab (Requires activation and access check in sidebar)
+# AI Chatbot Tab
 with tabs[4]:
     if firebase_initialized: log_visitor_activity("Tab: AI Chatbot", "view")
     st.header("AI Chatbot Assistant")
@@ -1673,43 +1455,35 @@ with tabs[4]:
     elif st.session_state.chat_active:
         if st.session_state.cleaned_data is not None and st.session_state.forecast_results is not None and st.session_state.evaluation_metrics is not None:
             st.info("Chat activated. Ask about the results.")
-            # Use a container with a fixed height for scrolling
             chat_container = st.container(height=400) 
             with chat_container:
                 for sender, message in st.session_state.chat_history:
                     msg_class = "user-message" if sender == "User" else "ai-message"
-                    # Ensure tooltip span is included for copy functionality
                     st.markdown(f'<div class="chat-message {msg_class}">{message}<span class="copy-tooltip">Copied!</span></div>', unsafe_allow_html=True)
             
             user_input = st.chat_input("Ask the AI assistant:")
             if user_input:
                 if firebase_initialized: log_visitor_activity("Chat", "send_message")
                 st.session_state.chat_history.append(("User", user_input))
-                # Display user message immediately (will be shown on rerun, but good practice)
-                # with chat_container:
-                #      st.markdown(f'<div class="chat-message user-message">{user_input}<span class="copy-tooltip">Copied!</span></div>', unsafe_allow_html=True)
-                
-                # Get AI response
                 with st.spinner("AI thinking..."): 
                     ai_response = get_gemini_chat_response(
                         user_input, st.session_state.chat_history, st.session_state.cleaned_data,
                         st.session_state.forecast_results, st.session_state.evaluation_metrics, st.session_state.ai_report
                     )
                 st.session_state.chat_history.append(("AI", ai_response))
-                # Rerun to display the full chat history including the new AI response
                 st.rerun()
         else:
             st.warning("Run a successful forecast first to provide context for the chatbot.")
-            st.session_state.chat_active = False # Deactivate if context is missing
+            st.session_state.chat_active = False
             st.rerun()
     else:
         st.info("Click 'Activate Chat' (sidebar) after a forecast." if gemini_configured else "AI Chat disabled.")
 
-# Admin Analytics Tab (Access controlled within the function)
+# Admin Analytics Tab
 with tabs[5]:
     if firebase_initialized: log_visitor_activity("Tab: Admin Analytics", "view")
     render_admin_analytics()
 
-# Ensure JavaScript is added at the end to catch all elements
-add_javascript_functionality()
+# Ensure JavaScript is added at the end if it relies on elements rendered in tabs
+# add_javascript_functionality() # Moved to Page Configuration section
 
