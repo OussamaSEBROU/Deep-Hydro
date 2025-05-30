@@ -6,7 +6,7 @@ Modifications:
 1. Refreshed user profile in session state after incrementing feature usage count in Firebase.
 2. Replaced user-facing instances of "LSTM" with "AI" or "Deep Learning".
 """
- 
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -247,7 +247,7 @@ def show_google_login_button():
             }}, '*');
           }}
         </script>
-        """, height=100, key="google_auth_component")
+
 
     # Handle the callback value from the component
     credential_token = st.session_state.get('google_auth_callback')
@@ -788,8 +788,7 @@ def capture_user_agent():
                 }}, "*");
                 </script>
                 """,
-                height=0,
-                key="user_agent_capture_component" 
+                height=0
             )
             # Check if the component returned a value immediately (less likely)
             if component_value:
