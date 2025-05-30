@@ -6,7 +6,7 @@ Modifications:
 1. Refreshed user profile in session state after incrementing feature usage count in Firebase.
 2. Replaced user-facing instances of "LSTM" with "AI" or "Deep Learning".
 """
-
+ 
 import streamlit as st
 import pandas as pd
 import numpy as np
