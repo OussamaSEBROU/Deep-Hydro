@@ -952,21 +952,22 @@ def generate_gemini_report(hist_df, forecast_df, metrics, language):
     if hist_df is None or forecast_df is None or metrics is None: return "Error: Insufficient data for AI report."
     try:
         prompt = f"""Act as a professional hydrologist. Provide a concise report in {language} based on the historical data, forecast, and metrics. Focus on trends, forecast reliability (mentioning C.I.), implications, and recommendations. **IMPORTANT: Do NOT discuss technical model details (architecture, training). Focus on data and outcomes.**
-
 Historical Summary:
-{hist_df["Level"].describe().to_string()}
+{hist_df["Level"].describe().to_string()
 
 Forecast Summary:
-{forecast_df[["Forecast", "Lower_CI", "Upper_CI"]].describe().to_string()}
-
+{forecast_df[["Forecast", "Lower_CI",
+"Upper_CI"]].describe().to_string()}
 Metrics:
 RMSE: {metrics.get('RMSE', 'N/A'):.4f}
 MAE: {metrics.get('MAE', 'N/A'):.4f}
 MAPE: {metrics.get('MAPE', 'N/A'):.2f}%
 
 Generate the report:"""
-        response = gemini_model_report.generate_content(prompt)
-        forbidden_terms = ["lstm", "long short-term memory", "epoch", "layer", "dropout", "adam optimizer", "sequence length"]
+        response =
+gemini_model_report.generate_content(prompt)
+forbidden_terms = ["lstm", "long short-term
+memory", "epoch", "layer", "dropout", "adamoptimizer", "sequence length"]
         cleaned_text = response.text
         for term in forbidden_terms: cleaned_text = cleaned_text.replace(term, "[modeling technique]")
         return cleaned_text
