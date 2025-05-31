@@ -952,22 +952,21 @@ def generate_gemini_report(hist_df, forecast_df, metrics, language):
     if hist_df is None or forecast_df is None or metrics is None: return "Error: Insufficient data for AI report."
     try:
         prompt = f"""Act as a professional hydrologist. Provide a concise report in {language} based on the historical data, forecast, and metrics. Focus on trends, forecast reliability (mentioning C.I.), implications, and recommendations. **IMPORTANT: Do NOT discuss technical model details (architecture, training). Focus on data and outcomes.**
+
 Historical Summary:
-{hist_df["Level"].describe().to_string()
+{hist_df["Level"].describe().to_string()}
 
 Forecast Summary:
-{forecast_df[["Forecast", "Lower_CI",
-"Upper_CI"]].describe().to_string()}
+{forecast_df[["Forecast", "Lower_CI", "Upper_CI"]].describe().to_string()}
+
 Metrics:
 RMSE: {metrics.get('RMSE', 'N/A'):.4f}
 MAE: {metrics.get('MAE', 'N/A'):.4f}
 MAPE: {metrics.get('MAPE', 'N/A'):.2f}%
 
 Generate the report:"""
-        response =
-gemini_model_report.generate_content(prompt)
-forbidden_terms = ["lstm", "long short-term
-memory", "epoch", "layer", "dropout", "adamoptimizer", "sequence length"]
+        response = gemini_model_report.generate_content(prompt)
+        forbidden_terms = ["lstm", "long short-term memory", "epoch", "layer", "dropout", "adam optimizer", "sequence length"]
         cleaned_text = response.text
         for term in forbidden_terms: cleaned_text = cleaned_text.replace(term, "[modeling technique]")
         return cleaned_text
@@ -978,31 +977,31 @@ def get_gemini_chat_response(user_query, chat_hist, hist_df, forecast_df, metric
     if hist_df is None or forecast_df is None or metrics is None: return "Error: Insufficient context for AI chat."
     try:
         context_parts = [
-    "You are a senior AI and hydrogeology expert with over 20 years of experience in groundwater analysis and predictive modeling.",
-    "Your task is to interpret the following groundwater data and forecasts, and provide a professional engineering-style report.",
-    "**IMPORTANT: Do NOT discuss internal AI model mechanics. Focus only on data interpretation, patterns, trends, uncertainties, and implications for groundwater behavior.**",
-    "",
-    "### Historical Groundwater Summary:",
-    hist_df["Level"].describe().to_string(),
-    "",
-    "### Forecast Results Summary:",
-    forecast_df[["Forecast", "Lower_CI", "Upper_CI"]].describe().to_string(),
-    "",
-    f"### Forecast Accuracy Metrics:\nRMSE = {metrics.get('RMSE', 'N/A'):.4f}\nMAE = {metrics.get('MAE', 'N/A'):.4f}\nMAPE = {metrics.get('MAPE', 'N/A'):.2f}%",
-    "",
-    "### Existing AI Report (if available):",
-    ai_report if ai_report else "(No prior AI report available.)",
-    "",
-    "### Instructions:",
-    "- Write in the style of a senior data analyst or hydrogeological engineer's report.",
-    "- Identify trends, anomalies, and seasonal patterns in groundwater level data.",
-    - "Explain the forecast ranges (CI) and what they imply for groundwater conditions.",
-    "- Compare historical and forecast data to infer changes in groundwater behavior.",
-    "- Suggest potential implications for resource management, policy, or risk.",
-    "- Structure the output as: Executive Summary, Data Insights, Forecast Interpretation, Recommendations.",
-    "",
-    "### Previous Conversation (for context):"
-]
+            "You are a senior AI and hydrogeology expert with over 20 years of experience in groundwater analysis and predictive modeling.",
+            "Your task is to interpret the following groundwater data and forecasts, and provide a professional engineering-style report.",
+            "**IMPORTANT: Do NOT discuss internal AI model mechanics. Focus only on data interpretation, patterns, trends, uncertainties, and implications for groundwater behavior.**",
+            "",
+            "### Historical Groundwater Summary:",
+            hist_df["Level"].describe().to_string(),
+            "",
+            "### Forecast Results Summary:",
+            forecast_df[["Forecast", "Lower_CI", "Upper_CI"]].describe().to_string(),
+            "",
+            f"### Forecast Accuracy Metrics:\nRMSE = {metrics.get('RMSE', 'N/A'):.4f}\nMAE = {metrics.get('MAE', 'N/A'):.4f}\nMAPE = {metrics.get('MAPE', 'N/A'):.2f}%",
+            "",
+            "### Existing AI Report (if available):",
+            ai_report if ai_report else "(No prior AI report available.)",
+            "",
+            "### Instructions:",
+            "- Write in the style of a senior data analyst or hydrogeological engineer's report.",
+            "- Identify trends, anomalies, and seasonal patterns in groundwater level data.",
+            "- Explain the forecast ranges (CI) and what they imply for groundwater conditions.",
+            "- Compare historical and forecast data to infer changes in groundwater behavior.",
+            "- Suggest potential implications for resource management, policy, or risk.",
+            "- Structure the output as: Executive Summary, Data Insights, Forecast Interpretation, Recommendations.",
+            "",
+            "### Previous Conversation (for context):"
+        ]
         for sender, message in chat_hist[-6:]: context_parts.append(f"{sender}: {message}")
         context_parts.append(f"User: {user_query}"); context_parts.append("AI:")
         context = "\n".join(context_parts)
@@ -1504,4 +1503,5 @@ with tabs[5]:
 
 # Ensure JavaScript is added at the end if it relies on elements rendered in tabs
 # add_javascript_functionality() # Moved to Page Configuration section
+
 
