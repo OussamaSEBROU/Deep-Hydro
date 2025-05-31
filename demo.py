@@ -750,8 +750,8 @@ if GEMINI_API_KEY and GEMINI_API_KEY != "Gemini_api_key":
     try:
         genai.configure(api_key=GEMINI_API_KEY)
         generation_config = genai.types.GenerationConfig(temperature=0.7, top_p=0.95, top_k=40, max_output_tokens=4000)
-        gemini_model_report = genai.GenerativeModel(model_name="gemini-pro", generation_config=generation_config)
-        gemini_model_chat = genai.GenerativeModel(model_name="gemini-pro", generation_config=generation_config)
+        gemini_model_report = genai.GenerativeModel(model_name="gemini-2.5-flash-preview-04-17", generation_config=generation_config)
+        gemini_model_chat = genai.GenerativeModel(model_name="gemini-2.5-flash-preview-04-17", generation_config=generation_config)
         gemini_configured = True
     except Exception as e:
         st.error(f"Error configuring Gemini API: {e}. AI features might be limited.")
@@ -977,14 +977,31 @@ def get_gemini_chat_response(user_query, chat_hist, hist_df, forecast_df, metric
     if hist_df is None or forecast_df is None or metrics is None: return "Error: Insufficient context for AI chat."
     try:
         context_parts = [
-            "You are an AI assistant analyzing groundwater forecast results.",
-            "**IMPORTANT: Do NOT discuss technical model details. Focus on interpreting data, forecast, and report.**",
-            "Historical Summary:", hist_df["Level"].describe().to_string(),
-            "Forecast Summary:", forecast_df[["Forecast", "Lower_CI", "Upper_CI"]].describe().to_string(),
-            f"Metrics: RMSE={metrics.get('RMSE', 'N/A'):.4f}, MAE={metrics.get('MAE', 'N/A'):.4f}, MAPE={metrics.get('MAPE', 'N/A'):.2f}%",
-            "AI Report:", ai_report if ai_report else "(Not generated)",
-            "\nPrevious Conversation:"
-        ]
+    "You are a senior AI and hydrogeology expert with over 20 years of experience in groundwater analysis and predictive modeling.",
+    "Your task is to interpret the following groundwater data and forecasts, and provide a professional engineering-style report.",
+    "**IMPORTANT: Do NOT discuss internal AI model mechanics. Focus only on data interpretation, patterns, trends, uncertainties, and implications for groundwater behavior.**",
+    "",
+    "### Historical Groundwater Summary:",
+    hist_df["Level"].describe().to_string(),
+    "",
+    "### Forecast Results Summary:",
+    forecast_df[["Forecast", "Lower_CI", "Upper_CI"]].describe().to_string(),
+    "",
+    f"### Forecast Accuracy Metrics:\nRMSE = {metrics.get('RMSE', 'N/A'):.4f}\nMAE = {metrics.get('MAE', 'N/A'):.4f}\nMAPE = {metrics.get('MAPE', 'N/A'):.2f}%",
+    "",
+    "### Existing AI Report (if available):",
+    ai_report if ai_report else "(No prior AI report available.)",
+    "",
+    "### Instructions:",
+    "- Write in the style of a senior data analyst or hydrogeological engineer's report.",
+    "- Identify trends, anomalies, and seasonal patterns in groundwater level data.",
+    - "Explain the forecast ranges (CI) and what they imply for groundwater conditions.",
+    "- Compare historical and forecast data to infer changes in groundwater behavior.",
+    "- Suggest potential implications for resource management, policy, or risk.",
+    "- Structure the output as: Executive Summary, Data Insights, Forecast Interpretation, Recommendations.",
+    "",
+    "### Previous Conversation (for context):"
+]
         for sender, message in chat_hist[-6:]: context_parts.append(f"{sender}: {message}")
         context_parts.append(f"User: {user_query}"); context_parts.append("AI:")
         context = "\n".join(context_parts)
