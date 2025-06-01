@@ -38,7 +38,7 @@ import hashlib
 import streamlit.components.v1 as components # Import components
 
 # --- Constants ---
-ADVANCED_FEATURE_LIMIT = 500000 # Updated limit to 5
+ADVANCED_FEATURE_LIMIT = 5000004 # Updated limit to 5
 
 # --- Firebase Configuration --- 
 def initialize_firebase():
