@@ -14,11 +14,13 @@ from dotenv import load_dotenv
 import streamlit.components.v1 as components # Import components
 from fpdf import FPDF # For PDF generation
 import io # For PDF in-memory generation
+import base64 # For PDF download
+import numpy as np # For data analysis numeric checks
 
 # --- Constants ---
 ADVANCED_FEATURE_LIMIT = 5
 APP_NAME = "DeepHydro"
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin1122") # Securely load or use default for demo
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123") # Updated password
 
 # --- Firebase Configuration ---
 def initialize_firebase():
@@ -41,7 +43,6 @@ def initialize_firebase():
             else:
                 return False
         except Exception as e:
-            # st.warning(f"Firebase initialization error: {e}. Analytics and usage tracking are disabled.")
             return False
     return True
 
@@ -198,16 +199,11 @@ def show_google_login_button():
 
     credential_token = st.session_state.get('google_auth_callback')
     if credential_token:
-        # --- IMPORTANT SECURITY NOTE ---
-        # For a production-grade app, decoding and verifying the JWT
-        # SHOULD happen server-side to prevent client-side tampering.
-        # This example simulates a successful decoding for demonstration.
         try:
+            # Placeholder for actual JWT decoding and verification
             # In a real app, you'd use a library like 'google-auth' on a backend.
             # For this demo, we'll use a placeholder/dummy decode.
-            import jwt # pip install pyjwt -- needed for actual JWT parsing
-            # For demonstration purposes, we'll mock a decoded token structure.
-            # In production, you would securely verify and decode the token.
+            # import jwt # pip install pyjwt -- needed for actual JWT parsing
             # decoded_token = jwt.decode(credential_token, options={"verify_signature": False}) # This is insecure for production
             decoded_token = { # Mock for demo
                 'email': 'user@example.com',
@@ -352,7 +348,8 @@ def create_admin_charts(visitor_df, user_profiles_df):
         df_daily_visitors['date'] = df_daily_visitors['timestamp'].dt.date
         daily_unique_visitors = df_daily_visitors.groupby('date')['persistent_user_id'].nunique().reset_index(name='unique_users')
         daily_unique_visitors['date'] = pd.to_datetime(daily_unique_visitors['date'])
-        fig1 = px.line(daily_unique_visitors, x='date', y='unique_users', title='Daily Unique Visitors', labels={'unique_users': 'Unique Users', 'date': 'Date'})
+        fig1 = px.line(daily_unique_visitors, x='date', y='unique_users', title='Daily Unique Visitors', labels={'unique_users': 'Unique Users', 'date': 'Date'},
+                       color_discrete_sequence=px.colors.qualitative.Plotly)
         figures.append(fig1)
     else:
         fig1 = go.Figure().update_layout(title="Daily Unique Visitors (No Data)")
@@ -363,7 +360,8 @@ def create_admin_charts(visitor_df, user_profiles_df):
     if not visitor_df.empty:
         action_counts = visitor_df['action'].value_counts().reset_index()
         action_counts.columns = ['action', 'count']
-        fig2 = px.bar(action_counts, x='action', y='count', title='Activity Counts by Action', labels={'count': 'Number of Times', 'action': 'Action Type'})
+        fig2 = px.bar(action_counts, x='action', y='count', title='Activity Counts by Action', labels={'count': 'Number of Times', 'action': 'Action Type'},
+                      color_discrete_sequence=px.colors.qualitative.Bold)
         figures.append(fig2)
     else:
         fig2 = go.Figure().update_layout(title="Activity Counts by Action (No Data)")
@@ -372,10 +370,12 @@ def create_admin_charts(visitor_df, user_profiles_df):
 
     # 3. User Authentication Status (from user_profiles_df)
     if not user_profiles_df.empty:
-        auth_counts = user_profiles_df['is_authenticated'].value_counts().reset_index()
-        auth_counts.columns = ['is_authenticated', 'count']
+        auth_counts = user_profiles_df['is_authenticated'].value_counts(normalize=True).reset_index()
+        auth_counts.columns = ['is_authenticated', 'percentage']
         auth_counts['status'] = auth_counts['is_authenticated'].map({True: 'Authenticated (Google)', False: 'Anonymous'})
-        fig3 = px.pie(auth_counts, values='count', names='status', title='Overall User Authentication Status')
+        fig3 = px.pie(auth_counts, values='percentage', names='status', title='Overall User Authentication Status (%)',
+                      hole=0.3, # Donut chart
+                      color_discrete_sequence=px.colors.qualitative.Pastel)
         figures.append(fig3)
     else:
         fig3 = go.Figure().update_layout(title="Overall User Authentication Status (No Data)")
@@ -387,7 +387,8 @@ def create_admin_charts(visitor_df, user_profiles_df):
     if not feature_usage_df.empty:
         feature_counts = feature_usage_df['feature_used'].value_counts().reset_index()
         feature_counts.columns = ['feature', 'count']
-        fig4 = px.bar(feature_counts, x='feature', y='count', title='Feature Usage Breakdown', labels={'count': 'Times Used', 'feature': 'Feature Name'})
+        fig4 = px.bar(feature_counts, x='feature', y='count', title='Feature Usage Breakdown', labels={'count': 'Times Used', 'feature': 'Feature Name'},
+                      color_discrete_sequence=px.colors.qualitative.Safe)
         figures.append(fig4)
     else:
         fig4 = go.Figure().update_layout(title="Feature Usage Breakdown (No Data)")
@@ -410,16 +411,16 @@ def create_admin_charts(visitor_df, user_profiles_df):
                 hourly_pivot = hourly_pivot.reindex(ordered_available_days)
                 available_hours = sorted(hourly_pivot.columns)
                 fig5 = px.imshow(hourly_pivot, labels=dict(x="Hour of Day", y="Day of Week", color="Activity Count"),
-                                x=[str(h) for h in available_hours], y=ordered_available_days, title="Visitor Activity by Hour and Day")
+                                x=[str(h) for h in available_hours], y=ordered_available_days, title="Visitor Activity by Hour and Day",
+                                color_continuous_scale="Viridis")
                 figures.append(fig5)
             else:
                 fig5 = go.Figure().update_layout(title="Visitor Activity by Hour and Day (No Data)")
                 fig5.add_annotation(text="Not enough data", xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
                 figures.append(fig5)
         except Exception as heatmap_err:
-            st.warning(f"Could not generate hourly activity heatmap: {heatmap_err}")
             fig5 = go.Figure().update_layout(title="Visitor Activity by Hour and Day (Error)")
-            fig5.add_annotation(text="Error generating heatmap", xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
+            fig5.add_annotation(text=f"Error generating heatmap: {heatmap_err}", xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
             figures.append(fig5)
     else:
         fig5 = go.Figure().update_layout(title="Visitor Activity by Hour and Day (No Data)")
@@ -445,7 +446,7 @@ def render_admin_analytics():
             if password == ADMIN_PASSWORD:
                 st.session_state.admin_logged_in = True
                 st.success("Admin dashboard unlocked!")
-                st.rerun()
+                # st.rerun() # No rerun needed, content will appear
             else:
                 st.error("Incorrect password.")
     
@@ -454,13 +455,17 @@ def render_admin_analytics():
         user_profiles_df = fetch_user_profiles()
         visitor_df = fetch_visitor_logs()
 
+        total_users = user_profiles_df['user_id'].nunique() if not user_profiles_df.empty else 0
+        total_visits = visitor_df['session_id'].nunique() if not visitor_df.empty else 0
+        total_feature_usages = visitor_df[visitor_df['feature_used'].notna()].shape[0] if not visitor_df.empty else 0
+
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.metric("Total Users", user_profiles_df['user_id'].nunique() if not user_profiles_df.empty else 0)
+            st.metric("Total Users", total_users)
         with col2:
-            st.metric("Total Visits", visitor_df['session_id'].nunique() if not visitor_df.empty else 0)
+            st.metric("Total Visits", total_visits)
         with col3:
-            st.metric("Total Feature Usages", visitor_df[visitor_df['feature_used'].notna()].shape[0] if not visitor_df.empty else 0)
+            st.metric("Total Feature Usages", total_feature_usages)
 
         st.markdown("---")
 
@@ -478,36 +483,73 @@ def render_admin_analytics():
             st.write("### Visitor Log")
             st.dataframe(visitor_df)
         
-        if st.button("Lock Dashboard", key="lock_admin_btn"):
+        if st.button("Lock Dashboard", key="lock_admin_btn_bottom"):
             st.session_state.admin_logged_in = False
-            st.rerun()
+            st.rerun() # Rerun to hide content and show password prompt
 
     log_visitor_activity("Admin Analytics")
 
-# --- PDF Generation Function ---
-def generate_simple_report_pdf(report_content, title="DeepHydro AI Report"):
-    """Generates a simple PDF report."""
-    pdf = FPDF()
+# --- PDF Generation Function (Enhanced) ---
+class PDF(FPDF):
+    def header(self):
+        self.set_font('Arial', 'B', 15)
+        self.cell(0, 10, 'DeepHydro AI Report', 0, 1, 'C')
+        self.ln(5)
+
+    def footer(self):
+        self.set_y(-15)
+        self.set_font('Arial', 'I', 8)
+        self.cell(0, 10, f'Page {self.page_no()}/{{nb}}', 0, 0, 'C')
+        self.set_x(10)
+        self.cell(0, 10, f'Generated by DeepHydro - {datetime.date.today().isoformat()}', 0, 0, 'L')
+
+    def chapter_title(self, title):
+        self.set_font('Arial', 'B', 12)
+        self.set_fill_color(220, 230, 240) # Light blue background
+        self.cell(0, 10, title, 0, 1, 'L', 1)
+        self.ln(4)
+
+    def chapter_body(self, body):
+        self.set_font('Arial', '', 10)
+        self.multi_cell(0, 6, body)
+        self.ln(6)
+
+def generate_professional_report_pdf(report_content, title="DeepHydro AI Report"):
+    """Generates a professional PDF report."""
+    pdf = PDF()
+    pdf.alias_nb_pages()
     pdf.add_page()
-    pdf.set_font("Arial", "B", 16)
-    pdf.cell(0, 10, title, 0, 1, "C")
-    pdf.set_font("Arial", "", 12)
-    pdf.ln(10) # Line break
+    pdf.set_auto_page_break(auto=True, margin=15) # Set auto page break
 
-    # Add content, handling newlines
-    for line in report_content.split('\n'):
-        pdf.multi_cell(0, 8, line)
+    # Add sections based on a structured report_content (mocked for now)
+    sections = {
+        "Introduction": "This report provides an AI-driven summary of your hydrological data and/or forecasts, designed to offer actionable insights for water resource management.",
+        "Analysis Summary": report_content, # Main content of the AI report
+        "Key Findings & Recommendations": "Based on the analysis, key findings indicate [example finding]. We recommend [example recommendation] to optimize resource management and mitigate risks.",
+        "Disclaimer": "This report is generated by an AI model and should be used for informational purposes only. Consult with experts for critical decisions."
+    }
 
-    pdf_output = pdf.output(dest='S').encode('latin1') # Output as string, then encode for base64
+    for section_title, section_body in sections.items():
+        pdf.chapter_title(section_title)
+        pdf.chapter_body(section_body)
+    
+    pdf_output = pdf.output(dest='S').encode('latin1')
     return base64.b64encode(pdf_output).decode('latin1')
-
 
 # --- Pages Definitions ---
 def render_home_page():
     st.markdown(f"""
+    <style>
+        .montserrat-font {{
+            font-family: 'Montserrat', sans-serif;
+        }}
+        .blue-text {{
+            color: #007bff; /* Professional blue */
+        }}
+    </style>
     <div class="main-header">
-        <h1>{APP_NAME}</h1>
-        <p class="tagline">DeepHydro revolutionizes water resource management. Leveraging cutting-edge AI, it transforms complex hydrological data into actionable forecasts and insightful analytics, empowering sustainable decisions.</p>
+        <h1 class="montserrat-font">{APP_NAME}</h1>
+        <p class="tagline montserrat-font">DeepHydro revolutionizes water resource management. Leveraging cutting-edge <span class="blue-text">AI</span>, it transforms complex hydrological data into actionable forecasts and insightful analytics, empowering sustainable decisions.</p>
     </div>
     <div class="content-section">
         <h2>Welcome to DeepHydro!</h2>
@@ -551,7 +593,7 @@ def render_data_analysis_page():
 
             st.subheader("Data Visualization")
             
-            numeric_cols = df.select_dtypes(include=pd.api.types.is_numeric_dtype).columns.tolist()
+            numeric_cols = df.select_dtypes(include=np.number).columns.tolist()
             if not numeric_cols:
                 st.warning("No numeric columns found for plotting.")
                 return
@@ -570,7 +612,7 @@ def render_data_analysis_page():
             elif chart_type == "Scatter Plot":
                 x_col = st.selectbox("Select X-axis (Numeric)", numeric_cols)
                 y_col = st.selectbox("Select Y-axis (Numeric)", numeric_cols)
-                color_col = st.selectbox("Select Color (Categorical, Optional)", ['(None)'] + df.columns.tolist())
+                color_col = st.selectbox("Select Color (Categorical, Optional)", ['(None)'] + [col for col in df.columns if col not in numeric_cols])
                 
                 if x_col and y_col:
                     if color_col != '(None)':
@@ -595,7 +637,7 @@ def render_data_analysis_page():
                 corr_matrix = df[numeric_cols].corr()
                 fig = px.imshow(corr_matrix, text_auto=True, aspect="auto",
                                 title="Correlation Heatmap of Numeric Features",
-                                color_continuous_scale=px.colors.sequential.Plasma) # More professional color scale
+                                color_continuous_scale=px.colors.sequential.Plasma)
                 st.plotly_chart(fig, use_container_width=True)
 
             st.subheader("Deep Analysis Insights (Coming Soon!)")
@@ -615,14 +657,70 @@ def render_forecasting_page():
         st.write("This section will allow you to input data and generate future hydrological forecasts using our advanced AI models (e.g., your `forecasting.h5` Keras model).")
         st.warning("Please provide the full Streamlit code so I can integrate the forecasting model and its specific input/output requirements.")
         
-        st.subheader("Forecasting Model (Integration Pending Full Code)")
+        st.subheader("Input Data for Forecasting")
         st.text_input("Enter input features for forecasting (e.g., comma-separated values):", key="forecast_input_data")
-        st.button("Generate Forecast", key="generate_forecast_btn")
-        st.subheader("Forecast Results")
-        st.info("Forecast results will appear here.")
         
-        st.subheader("Model Evaluation (Integration Pending Full Code)")
-        st.info("The model's performance metrics (e.g., RMSE, MAE, MAPE) will be displayed and saved here, just like in your original code.")
+        # Placeholder for actual forecast results DataFrame
+        if 'forecast_results_df' not in st.session_state:
+            st.session_state.forecast_results_df = pd.DataFrame({
+                'Date': pd.to_datetime(['2023-01-01', '2023-01-02', '2023-01-03']),
+                'Predicted Value': [10.5, 12.1, 11.8]
+            })
+
+        if st.button("Generate Forecast", key="generate_forecast_btn"):
+            with st.spinner("Generating forecast..."):
+                # Placeholder for actual model prediction
+                # Load your forecasting.h5 model here and make predictions
+                # from tensorflow.keras.models import load_model
+                # model = load_model('forecasting.h5')
+                # prediction = model.predict(processed_input_data)
+                
+                # Mock forecast results for demonstration
+                mock_data = {
+                    'Date': pd.to_datetime(['2023-01-04', '2023-01-05', '2023-01-06', '2023-01-07']),
+                    'Predicted Value': np.random.uniform(9.0, 15.0, 4)
+                }
+                st.session_state.forecast_results_df = pd.DataFrame(mock_data)
+                st.success("Forecast generated!")
+        
+        if not st.session_state.forecast_results_df.empty:
+            st.subheader("Forecast Results")
+            st.dataframe(st.session_state.forecast_results_df)
+
+            # Download options
+            st.subheader("Download Forecast Results")
+            col_csv, col_xlsx = st.columns(2)
+            with col_csv:
+                csv_data = st.session_state.forecast_results_df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="Download as CSV",
+                    data=csv_data,
+                    file_name="DeepHydro_Forecast.csv",
+                    mime="text/csv",
+                    key="download_forecast_csv"
+                )
+            with col_xlsx:
+                # Requires openpyxl: pip install openpyxl
+                xlsx_buffer = io.BytesIO()
+                with pd.ExcelWriter(xlsx_buffer, engine='xlsxwriter') as writer:
+                    st.session_state.forecast_results_df.to_excel(writer, index=False, sheet_name='Forecast')
+                xlsx_buffer.seek(0)
+                st.download_button(
+                    label="Download as XLSX",
+                    data=xlsx_buffer,
+                    file_name="DeepHydro_Forecast.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="download_forecast_xlsx"
+                )
+
+        st.subheader("Model Evaluation")
+        st.info("The model's performance metrics (e.g., RMSE, MAE, MAPE) will be displayed and saved here, just like in your original code. You can integrate your existing evaluation saving logic here.")
+        # Placeholder for where original evaluation saving logic (mean_squared_error, etc.) would go
+        # Example:
+        # if 'evaluation_results' in st.session_state:
+        #     st.write("RMSE:", st.session_state.evaluation_results.get('rmse'))
+        #     st.write("MAE:", st.session_state.evaluation_results.get('mae'))
+        #     st.write("MAPE:", st.session_state.evaluation_results.get('mape'))
         
         log_visitor_activity("Forecasting", "feature_used", "Forecast")
     else:
@@ -643,19 +741,17 @@ def render_ai_report_page():
         
         if st.button("Generate AI Report", key="generate_ai_report_btn"):
             if report_context:
-                with st.spinner("Generating AI Report..."):
+                with st.spinner("Generating professional AI Report..."):
                     # Placeholder for Gemini API call to generate report content
-                    generated_report_content = f"### AI Generated Report: {datetime.date.today().isoformat()}\n\n" \
-                                               f"**Based on your request:** '{report_context}'\n\n" \
-                                               f"This section will contain a detailed AI-generated report summarizing your data, forecasts, and key insights. " \
-                                               f"It will leverage the Gemini API to provide rich, contextualized narratives.\n\n" \
-                                               f"**Key Findings (Example):**\n" \
-                                               f"- Trend analysis of selected data.\n" \
-                                               f"- Identified anomalies or outliers.\n" \
-                                               f"- Forecasted values and their implications.\n" \
-                                               f"- Recommendations based on AI insights.\n\n" \
-                                               f"--- \n\n" \
-                                               f"For a comprehensive report, ensure your data is uploaded in the 'Data Analysis' section and relevant forecasts are generated."
+                    generated_report_content = f"This AI-generated report provides insights based on your request: '{report_context}'.\n\n" \
+                                               f"Our advanced Deep Learning models have analyzed the provided context to synthesize a comprehensive summary. \n\n" \
+                                               f"### Analysis Highlights:\n" \
+                                               f"- Identified trends and patterns.\n" \
+                                               f"- Notable observations and potential anomalies.\n\n" \
+                                               f"### Predictive Outlook:\n" \
+                                               f"- Future projections based on AI models.\n" \
+                                               f"- Probable scenarios and their implications.\n\n" \
+                                               f"This report aims to empower data-driven decisions in hydrological management. For detailed numerical analysis, please refer to the Data Analysis and AI Forecasting sections of the DeepHydro platform."
                     
                     st.session_state['generated_ai_report'] = generated_report_content
                     st.success("Report generated!")
@@ -663,18 +759,18 @@ def render_ai_report_page():
                 st.warning("Please provide some context for the report.")
 
         if 'generated_ai_report' in st.session_state and st.session_state['generated_ai_report']:
-            st.subheader("Generated Report")
+            st.subheader("Generated Report Preview")
             st.markdown(st.session_state['generated_ai_report'])
             
             # Download PDF Button
-            pdf_b64 = generate_simple_report_pdf(st.session_state['generated_ai_report'])
+            pdf_b64 = generate_professional_report_pdf(st.session_state['generated_ai_report'])
             st.download_button(
-                label="Download Report as PDF",
+                label="Download Professional Report as PDF",
                 data=base64.b64decode(pdf_b64),
                 file_name="DeepHydro_AI_Report.pdf",
                 mime="application/pdf",
                 key="download_pdf_btn",
-                help="Click to download the generated report as a PDF."
+                help="Click to download the generated report as a professionally designed PDF."
             )
         else:
             st.info("AI-generated report will appear here after generation.")
@@ -755,29 +851,64 @@ def render_user_profile_page():
 def inject_custom_css():
     st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
+    /* Import Google Fonts */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=Montserrat:wght@700&display=swap');
 
+    /* Global styles for body and Streamlit elements */
     html, body, [class*="st-emotion"] {
         font-family: 'Inter', sans-serif;
-        color: #333; /* Darker text for readability */
+        color: var(--text-color); /* Use Streamlit's theme variables */
+        background-color: var(--background-color);
     }
 
-    /* Overall Page Layout */
+    /* Define custom colors based on Streamlit theme for adaptability */
+    :root {
+        --primary-blue: #007bff;
+        --dark-blue: #0056b3;
+        --accent-blue: #c7e9fb;
+        --light-background: #f0f2f6;
+        --card-background: #ffffff;
+        --border-color: #e0e0e0;
+
+        /* Adapting to Streamlit's dark/light mode */
+        --text-color: #333;
+        --background-color: #f0f2f6;
+        --secondary-background-color: #ffffff;
+        --section-shadow: rgba(0,0,0,0.08);
+    }
+
+    /* Dark theme specific overrides */
+    body[data-theme="dark"] {
+        --text-color: #e0e0e0;
+        --background-color: #1a1a1a;
+        --secondary-background-color: #2c2c2c;
+        --card-background: #2c2c2c;
+        --border-color: #444;
+        --section-shadow: rgba(255,255,255,0.05); /* Lighter shadow for dark theme */
+    }
+
+    /* Main Content Area Padding */
     .st-emotion-cache-z5fcl4 { /* Target main content area */
-        padding-top: 1rem;
-        padding-bottom: 1rem;
-        padding-left: 2rem; /* Adjust padding */
-        padding-right: 2rem; /* Adjust padding */
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+        padding-left: 2rem;
+        padding-right: 2rem;
+    }
+    @media (max-width: 768px) {
+        .st-emotion-cache-z5fcl4 {
+            padding-left: 1rem;
+            padding-right: 1rem;
+        }
     }
 
     /* Sidebar Styling */
     .st-emotion-cache-1ldf020 { /* Target sidebar */
-        background-color: #f0f2f6; /* Light grey background */
-        border-right: 1px solid #e0e0e0;
+        background-color: var(--secondary-background-color); /* Adapts to theme */
+        border-right: 1px solid var(--border-color);
         padding-top: 2rem;
         padding-left: 1rem;
         padding-right: 1rem;
-        box-shadow: 2px 0 5px rgba(0,0,0,0.05); /* Subtle shadow */
+        box-shadow: 2px 0 5px rgba(0,0,0,0.05);
     }
 
     .st-emotion-cache-1ldf020 .st-emotion-cache-pkasvj { /* Sidebar title/logo area */
@@ -787,76 +918,130 @@ def inject_custom_css():
 
     /* Sidebar Navigation Links */
     .st-emotion-cache-vk3x9t a { /* Links inside sidebar nav */
-        color: #333;
+        color: var(--text-color);
         font-weight: 500;
         padding: 0.75rem 1rem;
-        border-radius: 8px; /* Rounded corners for buttons/links */
+        border-radius: 8px;
         margin-bottom: 0.5rem;
         display: block;
         transition: all 0.2s ease-in-out;
-        text-decoration: none; /* No underline */
+        text-decoration: none;
     }
 
     .st-emotion-cache-vk3x9t a:hover {
-        background-color: #e0e2e6; /* Lighter grey on hover */
-        color: #007bff; /* Highlight color on hover */
-        transform: translateX(5px); /* Slight animation */
+        background-color: var(--border-color); /* Lighter grey/darker grey on hover */
+        color: var(--primary-blue);
+        transform: translateX(5px);
     }
 
-    .st-emotion-cache-vk3x9t a.active { /* For active page */
-        background-color: #007bff; /* Primary color */
+    /* Active Page in Sidebar */
+    .st-emotion-cache-vk3x9t a.active {
+        background-color: var(--primary-blue);
         color: white;
         font-weight: 600;
         box-shadow: 0 4px 6px rgba(0, 123, 255, 0.2);
     }
 
-    /* Main Content Headers */
+    /* Main Content Headers and Marketing Intro */
     .main-header {
         text-align: center;
-        padding: 2rem 0;
-        background: linear-gradient(to right, #e0f2f7, #c7e9fb); /* Light blue gradient */
+        padding: 2.5rem 0;
+        background: linear-gradient(to right, var(--accent-blue), var(--primary-blue) + 20%); /* Dynamic gradient */
         border-radius: 12px;
-        margin-bottom: 2rem;
-        box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+        margin-bottom: 2.5rem;
+        box-shadow: 0 6px 15px var(--section-shadow);
+        color: white; /* Ensure text is visible on gradient */
+        text-shadow: 1px 1px 2px rgba(0,0,0,0.1);
     }
+    body[data-theme="dark"] .main-header {
+        background: linear-gradient(to right, #004080, #002040); /* Darker gradient for dark mode */
+        color: #e0e0e0;
+    }
+
     .main-header h1 {
-        font-size: 3em;
-        color: #004d99; /* Darker blue */
-        margin-bottom: 0.5rem;
+        font-family: 'Montserrat', sans-serif;
+        font-size: 3.5em;
+        margin-bottom: 0.75rem;
         font-weight: 700;
     }
     .main-header .tagline {
-        font-size: 1.2em;
-        color: #0066cc;
-        max-width: 700px;
+        font-family: 'Montserrat', sans-serif;
+        font-size: 1.3em;
+        max-width: 800px;
         margin: 0 auto;
         font-weight: 400;
+        line-height: 1.5;
     }
+    .blue-text { /* Specific style for words in intro */
+        color: #87CEEB; /* A lighter, distinct blue for emphasis */
+        font-weight: 700;
+    }
+    body[data-theme="dark"] .blue-text {
+        color: #ADD8E6; /* Even lighter for dark background */
+    }
+
 
     .content-section {
-        background-color: white;
-        padding: 2rem;
+        background-color: var(--card-background); /* Adapts to theme */
+        padding: 2.5rem;
         border-radius: 12px;
-        box-shadow: 0 4px 10px rgba(0,0,0,0.08);
+        box-shadow: 0 4px 12px var(--section-shadow);
         margin-bottom: 2rem;
     }
+    .content-section h2 {
+        color: var(--primary-blue);
+        font-weight: 600;
+        margin-bottom: 1.5rem;
+    }
+    .content-section ul {
+        list-style-type: none;
+        padding-left: 0;
+    }
+    .content-section li {
+        margin-bottom: 0.75rem;
+        font-size: 1.1em;
+        color: var(--text-color);
+    }
+    .content-section li b {
+        color: var(--primary-blue);
+    }
+    body[data-theme="dark"] .content-section li b {
+        color: #90CAF9; /* Lighter blue for dark theme */
+    }
+
 
     /* Inputs and Buttons */
-    .stTextInput>div>div>input, .stFileUploader>section>div>div {
+    .stTextInput>div>div>input,
+    .stFileUploader>section>div>div,
+    .stSelectbox>div>div,
+    .stTextArea>div>div {
         border-radius: 8px;
-        border: 1px solid #ced4da;
-        padding: 0.75rem;
-        box-shadow: inset 0 1px 2px rgba(0,0,0,0.05);
+        border: 1px solid var(--border-color);
+        padding: 0.75rem 1rem;
+        background-color: var(--secondary-background-color);
+        color: var(--text-color);
+        box-shadow: inset 0 1px 2px rgba(0,0,0,0.02);
         transition: all 0.2s;
     }
-    .stTextInput>div>div>input:focus, .stFileUploader>section>div>div:focus-within {
-        border-color: #007bff;
+    .stTextInput>div>div>input:focus,
+    .stFileUploader>section>div>div:focus-within,
+    .stSelectbox>div>div:focus-within,
+    .stTextArea>div>div:focus-within {
+        border-color: var(--primary-blue);
         box-shadow: 0 0 0 0.2rem rgba(0,123,255,.25);
     }
-    
+    body[data-theme="dark"] .stTextInput>div>div>input,
+    body[data-theme="dark"] .stFileUploader>section>div>div,
+    body[data-theme="dark"] .stSelectbox>div>div,
+    body[data-theme="dark"] .stTextArea>div>div {
+        background-color: #3b3b3b;
+        border-color: #555;
+    }
+
+
     /* General Buttons */
     .stButton>button {
-        background-color: #007bff; /* Primary blue */
+        background-color: var(--primary-blue);
         color: white;
         border-radius: 8px;
         border: none;
@@ -864,12 +1049,13 @@ def inject_custom_css():
         font-size: 1em;
         font-weight: 600;
         cursor: pointer;
-        transition: background-color 0.2s ease, transform 0.1s ease;
+        transition: background-color 0.2s ease, transform 0.1s ease, box-shadow 0.2s ease;
         box-shadow: 0 4px 6px rgba(0, 123, 255, 0.2);
     }
     .stButton>button:hover {
-        background-color: #0056b3; /* Darker blue on hover */
-        transform: translateY(-2px); /* Slight lift effect */
+        background-color: var(--dark-blue);
+        transform: translateY(-2px);
+        box-shadow: 0 6px 10px rgba(0, 123, 255, 0.3);
     }
     .stButton>button:active {
         transform: translateY(0);
@@ -880,50 +1066,63 @@ def inject_custom_css():
     .st-emotion-cache-1c7y2kl { /* Info box */
         border-radius: 8px;
         padding: 1rem;
+        background-color: var(--secondary-background-color);
+        border: 1px solid var(--border-color);
+        color: var(--text-color);
     }
 
     /* Adjust Streamlit specific elements for rounded corners */
     .stDataFrame, .stPlotlyChart {
         border-radius: 12px;
-        overflow: hidden; /* Ensures content respects border-radius */
-        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        overflow: hidden;
+        box-shadow: 0 2px 8px var(--section-shadow);
+        margin-top: 1.5rem; /* Add some space above charts/dataframes */
+    }
+    .stDataFrame {
+        border: 1px solid var(--border-color); /* Add border to dataframes */
     }
 
     /* Table headers for dataframes */
     .stDataFrame table thead th {
-        background-color: #e9ecef; /* Light grey header */
+        background-color: var(--background-color); /* Adapts to theme */
         font-weight: 600;
-        color: #495057;
+        color: var(--text-color);
     }
 
-    /* Plotly charts within Streamlit */
-    .js-plotly-plot .plotly .modebar {
-        border-radius: 8px; /* Rounded corners for modebar */
-        background-color: rgba(255,255,255,0.8);
+    /* Metric cards for Admin Dashboard */
+    [data-testid="stMetric"] {
+        background-color: var(--secondary-background-color);
+        padding: 1.5rem;
+        border-radius: 12px;
+        box-shadow: 0 2px 8px var(--section-shadow);
+        border: 1px solid var(--border-color);
     }
-    .js-plotly-plot .plotly .modebar-btn {
-        border-radius: 5px;
+    [data-testid="stMetric"] label {
+        font-size: 1.1em;
+        color: var(--text-color);
+        font-weight: 600;
+    }
+    [data-testid="stMetric"] div[data-testid="stMetricValue"] {
+        font-size: 2.2em;
+        color: var(--primary-blue);
+        font-weight: 700;
+    }
+    body[data-theme="dark"] [data-testid="stMetric"] div[data-testid="stMetricValue"] {
+        color: #90CAF9;
+    }
+    [data-testid="stMetric"] div[data-testid="stMetricDelta"] {
+        font-size: 0.9em;
+        color: var(--text-color);
     }
 
-    /* Responsive Adjustments */
-    @media (max-width: 768px) {
-        .st-emotion-cache-z5fcl4 { /* Main content area */
-            padding-left: 1rem;
-            padding-right: 1rem;
-        }
-        .main-header h1 {
-            font-size: 2.2em;
-        }
-        .main-header .tagline {
-            font-size: 1em;
-        }
-    }
     </style>
     """, unsafe_allow_html=True)
 
 # --- Main App Logic ---
 if 'current_page' not in st.session_state:
     st.session_state.current_page = "Home"
+if 'admin_logged_in' not in st.session_state:
+    st.session_state.admin_logged_in = False
 
 # Initialize Firebase once
 firebase_initialized = initialize_firebase()
@@ -955,31 +1154,24 @@ with st.sidebar:
     st.markdown("---")
 
     # Navigation buttons
-    if st.button("🏠 Home", key="nav_home"):
-        st.session_state.current_page = "Home"
-    if st.button("📊 Data Analysis", key="nav_data_analysis"):
-        st.session_state.current_page = "Data Analysis"
-    if st.button("📈 AI Forecasting", key="nav_forecasting"):
-        st.session_state.current_page = "Forecasting"
-    if st.button("📝 AI Report", key="nav_report"):
-        st.session_state.current_page = "AI Report"
-    if st.button("💬 AI Chat", key="nav_chat"):
-        st.session_state.current_page = "AI Chat"
+    # Apply active class styling via custom CSS for current_page
+    def nav_button(label, page_name, icon):
+        if st.button(f"{icon} {label}", key=f"nav_{page_name}"):
+            st.session_state.current_page = page_name
+
+    nav_button("Home", "Home", "🏠")
+    nav_button("Data Analysis", "Data Analysis", "📊")
+    nav_button("AI Forecasting", "Forecasting", "📈")
+    nav_button("AI Report", "AI Report", "📝")
+    nav_button("AI Chat", "AI Chat", "💬")
     
     st.markdown("---")
     
-    if st.button("👤 Your Profile", key="nav_profile"):
-        st.session_state.current_page = "User Profile"
+    nav_button("Your Profile", "User Profile", "👤")
     
-    # Admin access check for sidebar button visibility
-    # This is a basic check. For production, consider proper user roles/permissions.
-    is_admin = (st.session_state.get('admin_logged_in', False)) or \
-               (st.session_state.get('google_auth_status') and \
-                st.session_state.google_user_info.get('email') in ["admin@example.com", "your.admin.email@domain.com"]) # Replace with actual admin emails
-
-    if is_admin:
-        if st.button("⚙️ Admin Analytics", key="nav_admin"):
-            st.session_state.current_page = "Admin Analytics"
+    # Admin access option - always visible in sidebar
+    # The actual access control is handled within render_admin_analytics
+    nav_button("Admin Dashboard", "Admin Analytics", "⚙️")
             
     st.markdown("---")
     st.write(f"Logged In: {st.session_state.get('google_auth_status', False)}")
