@@ -544,7 +544,11 @@ def render_home_page():
             font-family: 'Montserrat', sans-serif;
         }}
         .blue-text {{
-            color: #007bff; /* Professional blue */
+            color: #87CEEB; /* A lighter, distinct blue for emphasis */
+            font-weight: 700;
+        }}
+        body[data-theme="dark"] .blue-text {{
+            color: #ADD8E6; /* Even lighter for dark background */
         }}
     </style>
     <div class="main-header">
@@ -865,7 +869,7 @@ def inject_custom_css():
     :root {
         --primary-blue: #007bff;
         --dark-blue: #0056b3;
-        --accent-blue: #c7e9fb;
+        --accent-blue: #e0f2f7; /* Very light blue for gradient start */
         --light-background: #f0f2f6;
         --card-background: #ffffff;
         --border-color: #e0e0e0;
@@ -875,6 +879,7 @@ def inject_custom_css():
         --background-color: #f0f2f6;
         --secondary-background-color: #ffffff;
         --section-shadow: rgba(0,0,0,0.08);
+        --gradient-end-color-light: #c7e9fb; /* Slightly darker blue for gradient end */
     }
 
     /* Dark theme specific overrides */
@@ -885,10 +890,12 @@ def inject_custom_css():
         --card-background: #2c2c2c;
         --border-color: #444;
         --section-shadow: rgba(255,255,255,0.05); /* Lighter shadow for dark theme */
+        --gradient-start-color-dark: #004080;
+        --gradient-end-color-dark: #002040;
     }
 
     /* Main Content Area Padding */
-    .st-emotion-cache-z5fcl4 { /* Target main content area */
+    .st-emotion-cache-z5fcl4 { /* Target main content area (stApp) */
         padding-top: 2rem;
         padding-bottom: 2rem;
         padding-left: 2rem;
@@ -917,46 +924,54 @@ def inject_custom_css():
     }
 
     /* Sidebar Navigation Links */
-    .st-emotion-cache-vk3x9t a { /* Links inside sidebar nav */
+    /* Adjustments to make links look more like buttons */
+    div[data-testid="stSidebarNav"] li > a {
         color: var(--text-color);
         font-weight: 500;
         padding: 0.75rem 1rem;
-        border-radius: 8px;
+        border-radius: 8px; /* Rounded corners for buttons/links */
         margin-bottom: 0.5rem;
         display: block;
         transition: all 0.2s ease-in-out;
-        text-decoration: none;
+        text-decoration: none; /* No underline */
     }
 
-    .st-emotion-cache-vk3x9t a:hover {
+    div[data-testid="stSidebarNav"] li > a:hover {
         background-color: var(--border-color); /* Lighter grey/darker grey on hover */
-        color: var(--primary-blue);
-        transform: translateX(5px);
+        color: var(--primary-blue); /* Highlight color on hover */
+        transform: translateX(5px); /* Slight animation */
     }
 
-    /* Active Page in Sidebar */
-    .st-emotion-cache-vk3x9t a.active {
-        background-color: var(--primary-blue);
-        color: white;
-        font-weight: 600;
-        box-shadow: 0 4px 6px rgba(0, 123, 255, 0.2);
+    /* Active Page in Sidebar (Streamlit applies a data-testid or class to active pages) */
+    /* This might require inspecting actual Streamlit DOM for precise targeting */
+    /* For now, relying on general button styling for current_page logic */
+    /* A more robust solution for active state is complex with Streamlit's internal routing */
+    /* For manual page switching with st.button, you apply styling in Python */
+    .stButton > button {
+        /* Default styling, applies to sidebar buttons as well */
     }
+
 
     /* Main Content Headers and Marketing Intro */
     .main-header {
         text-align: center;
         padding: 2.5rem 0;
-        background: linear-gradient(to right, var(--accent-blue), var(--primary-blue) + 20%); /* Dynamic gradient */
+        /* Dynamic gradient based on theme */
+        background: linear-gradient(to right, var(--accent-blue), var(--gradient-end-color-light));
         border-radius: 12px;
         margin-bottom: 2.5rem;
         box-shadow: 0 6px 15px var(--section-shadow);
-        color: white; /* Ensure text is visible on gradient */
+        color: var(--text-color); /* Default text color, adjust below for white */
         text-shadow: 1px 1px 2px rgba(0,0,0,0.1);
     }
     body[data-theme="dark"] .main-header {
-        background: linear-gradient(to right, #004080, #002040); /* Darker gradient for dark mode */
-        color: #e0e0e0;
+        background: linear-gradient(to right, var(--gradient-start-color-dark), var(--gradient-end-color-dark));
+        color: #e0e0e0; /* Ensure text is visible on dark gradient */
     }
+    body:not([data-theme="dark"]) .main-header {
+        color: #004d99; /* Darker blue text for light gradient */
+    }
+
 
     .main-header h1 {
         font-family: 'Montserrat', sans-serif;
@@ -973,11 +988,12 @@ def inject_custom_css():
         line-height: 1.5;
     }
     .blue-text { /* Specific style for words in intro */
-        color: #87CEEB; /* A lighter, distinct blue for emphasis */
+        color: #007bff; /* Base professional blue for emphasis */
         font-weight: 700;
+        text-shadow: none; /* Remove text shadow for this specific part */
     }
     body[data-theme="dark"] .blue-text {
-        color: #ADD8E6; /* Even lighter for dark background */
+        color: #90CAF9; /* Lighter blue for dark background */
     }
 
 
@@ -993,6 +1009,10 @@ def inject_custom_css():
         font-weight: 600;
         margin-bottom: 1.5rem;
     }
+    body[data-theme="dark"] .content-section h2 {
+        color: #90CAF9; /* Lighter blue for dark theme headers */
+    }
+
     .content-section ul {
         list-style-type: none;
         padding-left: 0;
@@ -1063,13 +1083,17 @@ def inject_custom_css():
     }
 
     /* Info/Warning/Error boxes */
-    .st-emotion-cache-1c7y2kl { /* Info box */
+    [data-testid="stAlert"] { /* Target Streamlit's alert boxes directly */
         border-radius: 8px;
         padding: 1rem;
         background-color: var(--secondary-background-color);
         border: 1px solid var(--border-color);
         color: var(--text-color);
     }
+    [data-testid="stAlert"] > div { /* Inner div of alert for consistent padding */
+        padding: 0;
+    }
+
 
     /* Adjust Streamlit specific elements for rounded corners */
     .stDataFrame, .stPlotlyChart {
@@ -1156,8 +1180,27 @@ with st.sidebar:
     # Navigation buttons
     # Apply active class styling via custom CSS for current_page
     def nav_button(label, page_name, icon):
-        if st.button(f"{icon} {label}", key=f"nav_{page_name}"):
+        # Determine if the current button corresponds to the active page
+        is_active = "active" if st.session_state.current_page == page_name else ""
+        
+        # Use st.markdown to create clickable div with custom styling
+        st.markdown(f"""
+            <div class="sidebar-nav-item {is_active}">
+                <button onclick="parent.postMessage({{
+                    type: 'streamlit:setComponentValue',
+                    key: 'sidebar_button_click_{page_name}',
+                    value: true
+                }}, '*');" style="all: unset; cursor: pointer; display: block; width: 100%; text-align: left; padding: 0.75rem 1rem; color: inherit; font-weight: inherit;">
+                    {icon} {label}
+                </button>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        # Listen for the component value change to update current_page
+        if st.session_state.get(f'sidebar_button_click_{page_name}'):
             st.session_state.current_page = page_name
+            st.session_state[f'sidebar_button_click_{page_name}'] = False # Reset for future clicks
+            st.rerun() # Rerun to apply page change
 
     nav_button("Home", "Home", "🏠")
     nav_button("Data Analysis", "Data Analysis", "📊")
@@ -1169,8 +1212,7 @@ with st.sidebar:
     
     nav_button("Your Profile", "User Profile", "👤")
     
-    # Admin access option - always visible in sidebar
-    # The actual access control is handled within render_admin_analytics
+    # Admin dashboard always visible in sidebar
     nav_button("Admin Dashboard", "Admin Analytics", "⚙️")
             
     st.markdown("---")
