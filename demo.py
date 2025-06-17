@@ -27,7 +27,7 @@ import hashlib
 import streamlit.components.v1 as components # Import components
 
 # --- Constants ---
-ADVANCED_FEATURE_LIMIT = 5 # Updated limit to 5
+# ADVANCED_FEATURE_LIMIT removed as features are now unlimited.
 
 # --- Firebase Configuration --- 
 def initialize_firebase():
@@ -69,32 +69,15 @@ def get_client_ip():
         return "Unknown"
 
 def get_persistent_user_id():
-    """Generate or retrieve a persistent user ID."""
-    # If logged in via Google, use the Google user ID
-    if st.session_state.get('google_auth_status') and st.session_state.get('google_user_info'):
-        user_id = st.session_state.google_user_info.get('id', st.session_state.google_user_info.get('email')) # Prefer Google ID if available
-        if user_id:
-            st.session_state.persistent_user_id = user_id
-            return user_id
-
-    # Fallback for anonymous users or if Google ID is missing
-    if 'persistent_user_id' in st.session_state and st.session_state.persistent_user_id and not st.session_state.persistent_user_id.startswith('anon_'):
-         # If already logged in previously, keep using that ID until Google login happens
-         if st.session_state.get('google_auth_status'): pass # Already handled above
-         else: return st.session_state.persistent_user_id
-
-    # For anonymous users, create a hashed ID
-    ip_address = get_client_ip()
-    user_agent = st.session_state.get('user_agent', 'Unknown')
-    
-    # Create a stable hash
-    hash_input = f"{ip_address}-{user_agent}"
-    hashed_id = hashlib.sha256(hash_input.encode()).hexdigest()
-    persistent_id = f"anon_{hashed_id}"
-    
-    # Only set if not already set or if the user is truly anonymous now
-    if 'persistent_user_id' not in st.session_state or st.session_state.persistent_user_id is None or st.session_state.persistent_user_id.startswith('anon_'):
-        st.session_state.persistent_user_id = persistent_id
+    """Generate or retrieve a persistent user ID. Always generates an anonymous ID."""
+    if 'persistent_user_id' not in st.session_state:
+        ip_address = get_client_ip()
+        user_agent = st.session_state.get('user_agent', 'Unknown')
+        
+        # Create a stable hash from IP and user agent
+        hash_input = f"{ip_address}-{user_agent}"
+        hashed_id = hashlib.sha256(hash_input.encode()).hexdigest()
+        st.session_state.persistent_user_id = f"anon_{hashed_id}"
         
     return st.session_state.persistent_user_id
 
@@ -113,182 +96,26 @@ def get_or_create_user_profile(user_id):
                 'user_id': user_id,
                 'first_visit': datetime.datetime.now().isoformat(),
                 'visit_count': 1,
-                'is_authenticated': st.session_state.get('google_auth_status', False),
-                'feature_usage_count': 0,
+                'feature_usage_count': 0, # Still track, but not for limits
                 'last_visit': datetime.datetime.now().isoformat(),
-                'google_user_info': st.session_state.get('google_user_info') # Store Google info if authenticated
             }
             ref.set(profile)
-            # st.info(f"Created new user profile for {user_id}") # Debug
         else:
             # Update visit count and last visit time if it's a new session
             if 'session_visit_logged' not in st.session_state:
                 profile['visit_count'] = profile.get('visit_count', 0) + 1
                 profile['last_visit'] = datetime.datetime.now().isoformat()
-                # Update auth status and Google info if they logged in this session
-                profile['is_authenticated'] = st.session_state.get('google_auth_status', False)
-                if profile['is_authenticated']:
-                     profile['google_user_info'] = st.session_state.get('google_user_info')
                 ref.update({'visit_count': profile['visit_count'], 
-                            'last_visit': profile['last_visit'],
-                            'is_authenticated': profile['is_authenticated'],
-                            'google_user_info': profile.get('google_user_info')})
+                            'last_visit': profile['last_visit']})
                 st.session_state.session_visit_logged = True # Mark visit as logged for this session
-                # st.info(f"Updated visit count for {user_id} to {profile['visit_count']}") # Debug
             
         return profile, is_new_user
     except Exception as e:
         st.warning(f"Firebase error getting/creating user profile for {user_id}: {e}")
         return None, False
 
-def increment_feature_usage(user_id):
-    """Increment the feature usage count for the user in Firebase."""
-    if not firebase_admin._apps:
-        return False
-    
-    try:
-        ref = db.reference(f'users/{user_id}/feature_usage_count')
-        # Atomically increment the count
-        current_count = ref.get() or 0
-        new_count = current_count + 1
-        ref.set(new_count)
-        
-        # Update session state as well by fetching the updated profile
-        if 'user_profile' in st.session_state:
-            # Fetch the parent (user profile) data after update
-            updated_profile = ref.parent.get()
-            if updated_profile:
-                st.session_state.user_profile = updated_profile
-            else:
-                 # Fallback: update count locally if fetch fails
-                 if st.session_state.user_profile:
-                     st.session_state.user_profile['feature_usage_count'] = new_count
-        return True
-    except Exception as e:
-        st.warning(f"Firebase error incrementing usage count for {user_id}: {e}")
-        return False
-
-# --- Authentication Check & Google Login --- 
-def check_feature_access():
-    """Check if user can access advanced features based on usage count and auth status."""
-    if 'user_profile' not in st.session_state or st.session_state.user_profile is None:
-        # Try to fetch profile again if missing
-        user_id = get_persistent_user_id()
-        st.session_state.user_profile, _ = get_or_create_user_profile(user_id)
-        if st.session_state.user_profile is None:
-            st.warning("Could not retrieve user profile. Feature access may be limited.")
-            # Deny access if profile fetch fails.
-            return False, "Cannot verify usage limit. Access denied."
-
-    usage_count = st.session_state.user_profile.get('feature_usage_count', 0)
-    is_authenticated = st.session_state.get('google_auth_status', False)
-
-    if is_authenticated:
-        return True, "Access granted (Authenticated)."
-    elif usage_count < ADVANCED_FEATURE_LIMIT: # Use the updated constant
-        return True, f"Access granted (Usage: {usage_count}/{ADVANCED_FEATURE_LIMIT})."
-    else:
-        return False, f"Usage limit ({ADVANCED_FEATURE_LIMIT}) reached. Please log in with Google to continue."
-
-# Placeholder for Google Sign-In component
-def show_google_login_button():
-    """Displays the Google Sign-In button and handles the callback."""
-    st.warning(f"Usage limit ({ADVANCED_FEATURE_LIMIT}) reached for advanced features.")
-    st.info("Please log in with Google to continue using AI Report, Forecasting, and AI Chat.")
-    
-    google_client_id = os.getenv("GOOGLE_CLIENT_ID")
-    if not google_client_id:
-        st.error("Google Client ID not configured. Cannot enable Google Sign-In. Set GOOGLE_CLIENT_ID environment variable.")
-        return
-
-    # Use components.html for Google Sign-In button
-    components.html(f"""
-        <script src="https://accounts.google.com/gsi/client" async defer></script>
-        <div id="g_id_onload"
-             data-client_id="{google_client_id}"
-             data-callback="handleCredentialResponse"
-             data-auto_prompt="false">
-        </div>
-        <div class="g_id_signin"
-             data-type="standard"
-             data-size="large"
-             data-theme="outline"
-             data-text="sign_in_with"
-             data-shape="rectangular"
-             data-logo_alignment="left">
-        </div>
-        <script>
-          function handleCredentialResponse(response) {{
-            /* Send the credential to Streamlit backend */
-            console.log("Encoded JWT ID token: " + response.credential);
-            window.parent.postMessage({{
-                'type': 'streamlit:setComponentValue',
-                'key': 'google_auth_callback', /* Key used by Streamlit to retrieve value */
-                'value': response.credential
-            }}, '*');
-          }}
-        </script>
-        """, height=100, key="google_auth_component") # Added key for the component itself
-
-    # Handle the callback value from the component
-    # Streamlit uses the 'key' in postMessage to store the value in session_state
-    credential_token = st.session_state.get('google_auth_callback')
-    if credential_token:
-        # --- IMPORTANT SECURITY NOTE --- 
-        # Decoding the JWT and verifying it SHOULD happen server-side.
-        # For this example, we'll simulate decoding.
-        try:
-            import jwt # Requires PyJWT: pip install pyjwt
-            # Replace with actual verified token info if using a real JWT library and backend
-            # For demonstration, we'll use a placeholder
-            # decoded_token = jwt.decode(credential_token, options={"verify_signature": False}) 
-            decoded_token = {
-                'email': 'user@example.com', 
-                'name': 'Test User',        
-                'picture': 'https://lh3.googleusercontent.com/a/ACg8ocJ9...=s96-c', 
-                'sub': '12345678901234567890' 
-            }
-            # --- End Placeholder --- 
-            
-            st.session_state.google_auth_status = True
-            st.session_state.google_user_info = {
-                'id': decoded_token.get('sub'),
-                'email': decoded_token.get('email'),
-                'name': decoded_token.get('name'),
-                'picture': decoded_token.get('picture')
-            }
-            st.session_state.persistent_user_id = st.session_state.google_user_info.get('id', st.session_state.google_user_info.get('email'))
-            
-            # Update Firebase profile
-            user_id = get_persistent_user_id()
-            profile, _ = get_or_create_user_profile(user_id)
-            if profile:
-                try:
-                    ref = db.reference(f'users/{user_id}')
-                    update_data = {
-                        'is_authenticated': True,
-                        'google_user_info': st.session_state.google_user_info,
-                        'last_login_google': datetime.datetime.now().isoformat()
-                    }
-                    if profile.get('visit_count', 0) <= 1:
-                         update_data['first_visit'] = profile.get('first_visit', datetime.datetime.now().isoformat())
-                         update_data['visit_count'] = 1
-                         update_data['feature_usage_count'] = profile.get('feature_usage_count', 0)
-                         
-                    ref.update(update_data)
-                    st.session_state.user_profile = ref.get() # Refresh profile
-                    st.success("Google login successful! Advanced features unlocked.")
-                    st.session_state.google_auth_callback = None # Clear callback value
-                    time.sleep(1.5)
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Firebase error updating profile after login: {e}")
-            else:
-                 st.error("Could not update user profile after login.")
-                 
-        except Exception as e:
-            st.error(f"Error processing Google Sign-In: {e}")
-            st.session_state.google_auth_callback = None
+# Removed increment_feature_usage and check_feature_access as per requirements (unlimited features)
+# Removed show_google_login_button and all related Google Auth logic.
 
 # --- Visitor Analytics Functions --- 
 def get_session_id():
@@ -305,22 +132,14 @@ def log_visitor_activity(page_name, action="page_view", feature_used=None):
         user_id = get_persistent_user_id()
         profile, _ = get_or_create_user_profile(user_id)
         
-        should_increment = feature_used in ['Forecast', 'AI Report', 'AI Chat']
-        access_granted, _ = check_feature_access()
-        
-        if should_increment:
-            if access_granted:
-                increment_feature_usage(user_id)
-            else:
-                action = f"denied_{action}"
-
         ref = db.reference('visitors_log') 
         log_id = str(uuid.uuid4())
         timestamp = datetime.datetime.now().isoformat()
         session_id = get_session_id()
         user_agent = st.session_state.get('user_agent', 'Unknown')
         ip_address = get_client_ip() 
-        is_authenticated = st.session_state.get('google_auth_status', False)
+        # is_authenticated is no longer relevant without Google Auth, setting to False
+        is_authenticated = False 
 
         log_data = {
             'timestamp': timestamp,
@@ -333,7 +152,7 @@ def log_visitor_activity(page_name, action="page_view", feature_used=None):
             'feature_used': feature_used,
             'session_id': session_id,
             'user_agent': user_agent,
-            'google_email': st.session_state.google_user_info.get('email') if is_authenticated else None
+            # google_email is no longer relevant
         }
         ref.child(log_id).set(log_data)
     except Exception as e:
@@ -376,13 +195,8 @@ def create_visitor_charts(visitor_df):
         fig2 = px.bar(action_counts, x='action', y='count', title='Activity Counts by Action', labels={'count': 'Number of Times', 'action': 'Action Type'})
         figures.append(fig2)
 
-        # Auth status
-        latest_status = df.sort_values('timestamp').groupby('persistent_user_id')['is_authenticated'].last().reset_index()
-        auth_counts = latest_status['is_authenticated'].value_counts().reset_index()
-        auth_counts.columns = ['is_authenticated', 'count']
-        auth_counts['status'] = auth_counts['is_authenticated'].map({True: 'Authenticated (Google)', False: 'Anonymous'})
-        fig3 = px.pie(auth_counts, values='count', names='status', title='User Authentication Status (Latest Known)')
-        figures.append(fig3)
+        # Auth status - simplified as authentication is removed
+        # Removed the 'Auth status' pie chart since Google Sign-in is no longer used.
 
         # Hourly activity heatmap
         try:
@@ -471,7 +285,8 @@ def render_admin_analytics():
             if user_id_filter != 'All':
                 filtered_df = filtered_df[filtered_df['persistent_user_id'] == user_id_filter]
             
-            display_cols = ['timestamp', 'persistent_user_id', 'is_authenticated', 'google_email', 'visit_count', 'page', 'action', 'feature_used', 'ip_address', 'session_id']
+            # Removed 'is_authenticated' and 'google_email' from display_cols
+            display_cols = ['timestamp', 'persistent_user_id', 'visit_count', 'page', 'action', 'feature_used', 'ip_address', 'session_id']
             st.dataframe(filtered_df[[col for col in display_cols if col in filtered_df.columns]])
             
             if st.button("Export Filtered to CSV", key="admin_export_btn"):
@@ -546,74 +361,178 @@ def get_custom_css():
         font-size: 0.9rem;
     }
     
-    /* Main content styles */
-    .main .block-container { padding-top: 1rem; padding-bottom: 1rem; }
-    h1 { font-weight: 700; font-size: 2rem; color: var(--text-color); } /* Stronger title */
-    h2 { font-weight: 600; font-size: 1.6rem; color: var(--text-color); }
-    h3, h4 { font-weight: 500; color: var(--text-color); }
-    .stButton > button { border-radius: 4px; font-weight: 500; transition: all 0.3s; padding: 0.5rem 1rem; }
-    .stButton > button:hover { opacity: 0.8; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
+    /* Main content styles - Professional and compact */
+    .main .block-container { 
+        padding-top: 1.5rem; /* Increased top padding */
+        padding-bottom: 1.5rem; /* Increased bottom padding */
+        padding-left: 2rem; /* Consistent side padding */
+        padding-right: 2rem; /* Consistent side padding */
+    }
+    h1 { 
+        font-weight: 700; 
+        font-size: 2.2rem; /* Larger and bolder for main titles */
+        color: var(--primary-color); /* Main titles in blue */
+        margin-bottom: 1.5rem; /* Space below title */
+    }
+    h2 { 
+        font-weight: 600; 
+        font-size: 1.8rem; 
+        color: var(--text-color); 
+        margin-top: 2rem; /* More space above subheaders */
+        margin-bottom: 1rem;
+    }
+    h3 { 
+        font-weight: 600; 
+        font-size: 1.4rem; 
+        color: var(--text-color); 
+        margin-top: 1.5rem; /* More space above h3 */
+        margin-bottom: 0.8rem;
+    }
+    h4 { 
+        font-weight: 500; 
+        font-size: 1.2rem; 
+        color: var(--text-color); 
+        margin-top: 1rem;
+        margin-bottom: 0.5rem;
+    }
+
+    .stButton > button { 
+        border-radius: 8px; /* Slightly more rounded buttons */
+        font-weight: 600; /* Bolder button text */
+        transition: all 0.3s ease-in-out; 
+        padding: 0.7rem 1.5rem; /* Larger padding for buttons */
+        border: 1px solid var(--primary-color); /* Outline button for professional look */
+        background-color: var(--primary-color);
+        color: white; /* White text on primary background */
+    }
+    .stButton > button:hover { 
+        opacity: 0.9; 
+        box-shadow: 0 4px 12px rgba(0,0,0,0.1); /* More pronounced shadow on hover */
+        transform: translateY(-2px); /* Slight lift effect */
+    }
+
+    /* Style for secondary buttons (e.g., download buttons if different styling is desired) */
+    .stDownloadButton > button {
+        background-color: var(--background-color);
+        color: var(--primary-color);
+        border: 1px solid var(--primary-color);
+    }
+    .stDownloadButton > button:hover {
+        background-color: var(--primary-color);
+        color: white;
+    }
+
     .css-1d391kg, .css-12oz5g7 { padding: 1rem; } 
-    .card-container { border-radius: 8px; padding: 1.2rem; margin-bottom: 1rem; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
-    .chat-message { padding: 1rem; border-radius: 8px; margin-bottom: 0.5rem; position: relative; }
+    .card-container { 
+        border-radius: 12px; /* More rounded cards */
+        padding: 1.5rem; /* Increased card padding */
+        margin-bottom: 1.5rem; /* More space between cards */
+        box-shadow: 0 4px 12px rgba(0,0,0,0.08); /* Stronger, softer shadow */
+        background-color: var(--secondary-background-color); /* Use secondary background for cards */
+        border: 1px solid rgba(128, 128, 128, 0.1); /* Subtle border */
+    }
+
+    .chat-message { 
+        padding: 1rem; 
+        border-radius: 12px; /* Rounded chat messages */
+        margin-bottom: 0.75rem; 
+        position: relative; 
+        font-size: 0.95rem; /* Slightly larger text */
+    }
     
-    /* Theme-aware chat messages */
     .user-message { 
-        border-left: 4px solid var(--primary-color); 
+        border-left: 5px solid var(--primary-color); /* Thicker border */
         background-color: var(--secondary-background-color); 
         color: var(--text-color);
     }
     .ai-message { 
-        border-left: 4px solid #78909C; /* A neutral gray */
+        border-left: 5px solid #78909C; /* A neutral gray, thicker border */
         background-color: var(--secondary-background-color); 
         color: var(--text-color);
     }
 
     .chat-message:active { opacity: 0.7; }
-    .copy-tooltip { position: absolute; top: 0.5rem; right: 0.5rem; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.8rem; display: none; background-color: #555; color: white; z-index: 10; }
+    .copy-tooltip { 
+        position: absolute; 
+        top: 0.5rem; 
+        right: 0.5rem; 
+        padding: 0.2rem 0.5rem; 
+        border-radius: 6px; 
+        font-size: 0.75rem; 
+        display: none; 
+        background-color: #555; 
+        color: white; 
+        z-index: 10; 
+        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    }
     .chat-message:active .copy-tooltip { display: block; }
-    .stTabs [data-baseweb="tab-list"] { gap: 2px; }
-    .stTabs [data-baseweb="tab"] { padding: 0.5rem 1rem; border-radius: 4px 4px 0 0; }
-    [data-testid="stMetricValue"] { font-weight: 600; }
+    .stTabs [data-baseweb="tab-list"] { 
+        gap: 8px; /* More space between tabs */
+        margin-bottom: 1.5rem; /* Space below tabs */
+    }
+    .stTabs [data-baseweb="tab"] { 
+        padding: 0.75rem 1.5rem; /* Larger tab clickable area */
+        border-radius: 8px 8px 0 0; /* More rounded tabs */
+        font-weight: 600; /* Bolder tab text */
+        background-color: var(--secondary-background-color); /* Tabs match card background */
+        color: var(--text-color);
+        transition: all 0.2s ease-in-out;
+    }
+    .stTabs [data-baseweb="tab"][aria-selected="true"] {
+        border-bottom: 3px solid var(--primary-color); /* Active tab indicator */
+        color: var(--primary-color);
+        background-color: var(--background-color); /* Active tab slightly different background */
+    }
+    .stTabs [data-baseweb="tab"]:hover {
+        background-color: var(--background-color);
+    }
+
+    [data-testid="stMetricValue"] { 
+        font-weight: 700; 
+        font-size: 1.5rem; /* Larger metric values */
+        color: var(--primary-color); /* Metrics in blue */
+    }
+    [data-testid="stMetricLabel"] {
+        font-size: 0.9rem;
+        color: var(--text-color);
+    }
     
     /* Theme-aware app intro */
     .app-intro { 
-        padding: 1rem; 
-        border-radius: 8px; 
-        margin-bottom: 1.5rem; 
-        border-left: 4px solid var(--primary-color); 
+        padding: 2rem; /* More spacious intro */
+        border-radius: 15px; /* Very rounded intro */
+        margin-bottom: 2.5rem; 
+        border-left: 8px solid var(--primary-color); /* Thicker blue border */
         background-color: var(--secondary-background-color); 
         color: var(--text-color);
+        box-shadow: 0 6px 20px rgba(0,0,0,0.15); /* Stronger intro shadow */
+    }
+    .app-intro h3 {
+        font-size: 1.8rem;
+        color: var(--primary-color); /* Intro heading in blue */
+        margin-bottom: 1rem;
     }
 
     .blue-text {
         color: #1E88E5; /* A standard blue */
     }
     
-    /* User Info Display */
-    .user-info-container {
-        display: flex;
-        align-items: center;
-        padding: 0.5rem;
-        margin-bottom: 1rem;
-        background-color: var(--secondary-background-color);
-        border-radius: 4px;
+    /* User Info Display - Removed as Google Sign-in is no longer used */
+    
+    /* General input styling */
+    .stFileUploader label, .stSelectbox label, .stNumberInput label, .stCheckbox label, .stTextInput label {
+        font-weight: 500; /* Bolder labels */
         color: var(--text-color);
     }
-    .user-info-container img {
-        border-radius: 50%;
-        width: 30px;
-        height: 30px;
-        margin-right: 0.8rem;
+    .stFileUploader div[data-testid="stFileUploadDropzone"],
+    .stTextInput input, .stNumberInput input, .stSelectbox div[data-baseweb="select"] {
+        border-radius: 8px; /* Rounded inputs */
+        border: 1px solid var(--secondary-background-color); /* Subtle border for inputs */
+        padding: 0.5rem 1rem;
     }
-    .user-info-container span {
-        font-size: 0.9rem;
-        color: var(--text-color);
+    .stFileUploader div[data-testid="stFileUploadDropzone"]:hover {
+        border-color: var(--primary-color); /* Highlight on hover */
     }
-
-    /* Professional PDF design suggestion */
-    /* This needs to be implemented within the FPDF logic as CSS doesn't apply to PDF generation directly */
-
     </style>
     """
 
@@ -950,8 +869,9 @@ def calculate_metrics(y_true, y_pred):
 # --- Plotting Functions --- 
 def create_forecast_plot(historical_df, forecast_df):
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=historical_df["Date"], y=historical_df["Level"], mode="lines", name="Historical Data", line=dict(color="var(--primary-color)"))) # Changed to use CSS variable
-    fig.add_trace(go.Scatter(x=forecast_df["Date"], y=forecast_df["Forecast"], mode="lines", name="Forecast", line=dict(color="rgb(255, 127, 14)")))
+    # Use Streamlit's primary color for historical data for theme compatibility
+    fig.add_trace(go.Scatter(x=historical_df["Date"], y=historical_df["Level"], mode="lines", name="Historical Data", line=dict(color="rgb(30, 144, 255)"))) # DodgerBlue as a primary example
+    fig.add_trace(go.Scatter(x=forecast_df["Date"], y=forecast_df["Forecast"], mode="lines", name="Forecast", line=dict(color="rgb(255, 127, 14)"))) # Orange for forecast
     fig.add_trace(go.Scatter(x=forecast_df["Date"], y=forecast_df["Upper_CI"], mode="lines", name="Upper CI (95%)", line=dict(width=0), showlegend=False))
     fig.add_trace(go.Scatter(x=forecast_df["Date"], y=forecast_df["Lower_CI"], mode="lines", name="Lower CI (95%)", line=dict(width=0), fillcolor="rgba(255, 127, 14, 0.2)", fill="tonexty", showlegend=True))
     fig.update_layout(title="Groundwater Level: Historical Data & AI Forecast", xaxis_title="Date", yaxis_title="Groundwater Level", hovermode="x unified", legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01), template="plotly_white")
@@ -964,8 +884,8 @@ def create_loss_plot(history_dict):
         return fig
     history_df = pd.DataFrame(history_dict); history_df["Epoch"] = history_df.index + 1
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=history_df["Epoch"], y=history_df["loss"], mode="lines", name="Training Loss"))
-    fig.add_trace(go.Scatter(x=history_df["Epoch"], y=history_df["val_loss"], mode="lines", name="Validation Loss"))
+    fig.add_trace(go.Scatter(x=history_df["Epoch"], y=history_df["loss"], mode="lines", name="Training Loss", line=dict(color="rgb(30, 144, 255)"))) # DodgerBlue
+    fig.add_trace(go.Scatter(x=history_df["Epoch"], y=history_df["val_loss"], mode="lines", name="Validation Loss", line=dict(color="rgb(255, 127, 14)"))) # Orange
     fig.update_layout(title="Model Training & Validation Loss", xaxis_title="Epoch", yaxis_title="Loss (MSE)", hovermode="x unified", template="plotly_white")
     return fig
 
@@ -1054,7 +974,9 @@ def run_forecast_pipeline(df, model_choice, forecast_horizon, custom_model_file_
         elif model_choice == "Upload Custom .h5 Model" and custom_model_file_obj:
             model, model_sequence_length = load_keras_model_from_file(custom_model_file_obj, "Custom Model")
             if model is None: return None, None, None, None
-        elif model_choice != "Train New Model":
+        elif model_choice == "Train New Model":
+            st.info("Training New Model selected. Model will be built and trained.")
+        else:
             st.error("Invalid model choice or missing file."); return None, None, None, None
         
         st.session_state.model_sequence_length = model_sequence_length
@@ -1104,7 +1026,7 @@ def run_forecast_pipeline(df, model_choice, forecast_horizon, custom_model_file_
             st.success("Evaluation complete.")
         else: # Pre-trained model evaluation
             st.info("Step 4b: Evaluating Pre-trained Model (Pseudo-Validation)...")
-            if len(X) > 5:
+            if len(X) > 5 and model: # Ensure model exists for pre-trained paths
                 val_split_idx = max(1, int(len(X) * 0.8))
                 X_val_pseudo, y_val_pseudo = X[val_split_idx:], y[val_split_idx:]
                 if len(X_val_pseudo) > 0:
@@ -1114,9 +1036,14 @@ def run_forecast_pipeline(df, model_choice, forecast_horizon, custom_model_file_
                     evaluation_metrics = calculate_metrics(y_val_actual, val_predictions)
                     st.success("Pseudo-evaluation complete.")
                 else: st.warning("Not enough data for pseudo-validation.")
-            else: st.warning("Not enough sequences for pseudo-validation.")
+            else: st.warning("Not enough sequences for pseudo-validation or model not loaded.")
+
 
         st.info(f"Step 5: Forecasting {forecast_horizon} Steps (MC Dropout: {mc_iterations_param})...")
+        if model is None: # Ensure model is available for prediction
+            st.error("Model not available for forecasting. Please check model loading/training steps.")
+            return None, None, None, None
+
         last_sequence_scaled_for_pred = scaled_data[-model_sequence_length:]
         mean_forecast, lower_bound, upper_bound = predict_with_dropout_uncertainty(
             model, last_sequence_scaled_for_pred, forecast_horizon, mc_iterations_param, scaler_obj, model_sequence_length
@@ -1142,6 +1069,63 @@ def run_forecast_pipeline(df, model_choice, forecast_horizon, custom_model_file_
         import traceback; st.error(traceback.format_exc())
         return None, None, None, None
 
+# --- New: Data Analysis & Statistics Tab Content ---
+def render_data_analysis_tab(cleaned_data, forecast_results):
+    st.header("Data Analysis & Statistics")
+
+    if cleaned_data is None:
+        st.info("Please upload data using the sidebar to see analysis.")
+        return
+    
+    st.subheader("Historical Data Overview")
+    st.dataframe(cleaned_data.describe().transpose())
+
+    fig_hist = px.histogram(cleaned_data, x="Level", nbins=30, 
+                            title="Distribution of Historical Groundwater Levels",
+                            labels={"Level": "Groundwater Level"},
+                            template="plotly_white")
+    st.plotly_chart(fig_hist, use_container_width=True)
+
+    if forecast_results is not None:
+        st.subheader("Forecasted Data Overview")
+        st.dataframe(forecast_results[['Forecast', 'Lower_CI', 'Upper_CI']].describe().transpose())
+
+        fig_forecast_hist = px.histogram(forecast_results, x="Forecast", nbins=30,
+                                         title="Distribution of Forecasted Groundwater Levels",
+                                         labels={"Forecast": "Forecasted Level"},
+                                         template="plotly_white", color_discrete_sequence=[px.colors.qualitative.Plotly[1]]) # Orange color
+        st.plotly_chart(fig_forecast_hist, use_container_width=True)
+
+        st.subheader("Historical vs. Forecasted Data Comparison")
+        # Combine data for comparison plot
+        combined_df = pd.DataFrame({
+            'Level': pd.concat([cleaned_data['Level'], forecast_results['Forecast']]),
+            'Type': ['Historical'] * len(cleaned_data) + ['Forecast'] * len(forecast_results)
+        })
+        fig_combined_dist = px.histogram(combined_df, x="Level", color="Type", histnorm='probability density',
+                                        barmode='overlay', opacity=0.7,
+                                        title="Density Distribution: Historical vs. Forecasted Levels",
+                                        labels={"Level": "Groundwater Level", "count": "Density"},
+                                        color_discrete_map={'Historical': "rgb(30, 144, 255)", 'Forecast': "rgb(255, 127, 14)"},
+                                        template="plotly_white")
+        fig_combined_dist.update_layout(bargap=0.1)
+        st.plotly_chart(fig_combined_dist, use_container_width=True)
+        
+        st.subheader("Key Statistical Differences")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Historical Mean", f"{cleaned_data['Level'].mean():.2f}")
+            st.metric("Forecast Mean", f"{forecast_results['Forecast'].mean():.2f}")
+        with col2:
+            st.metric("Historical Std Dev", f"{cleaned_data['Level'].std():.2f}")
+            st.metric("Forecast Std Dev", f"{forecast_results['Forecast'].std():.2f}")
+        with col3:
+            st.metric("Historical Range", f"{cleaned_data['Level'].max() - cleaned_data['Level'].min():.2f}")
+            st.metric("Forecast Range", f"{forecast_results['Forecast'].max() - forecast_results['Forecast'].min():.2f}")
+
+    else:
+        st.info("Run a forecast to see combined data analysis.")
+
 # --- Initialize Session State --- 
 def initialize_session_state():
     defaults = {
@@ -1151,9 +1135,9 @@ def initialize_session_state():
         "active_tab": 0, "report_language": "English", "chat_history": [], 
         "chat_active": False, "model_sequence_length": STANDARD_MODEL_SEQUENCE_LENGTH, 
         "run_forecast_triggered": False, "about_us_expanded": False,
-        "persistent_user_id": None, "user_profile": None, 
-        "google_auth_status": False, "google_user_info": None,
-        "google_auth_callback": None, "admin_authenticated": False, 
+        "persistent_user_id": None, # Will be set by get_persistent_user_id
+        "user_profile": None, # Will be set by get_or_create_user_profile
+        "admin_authenticated": False, 
         "session_visit_logged": False, "user_agent": None
     }
     for key, default_value in defaults.items():
@@ -1165,23 +1149,7 @@ initialize_session_state()
 with st.sidebar:
     st.title("DeepHydro AI")
     
-    # User Info / Logout
-    if st.session_state.google_auth_status and st.session_state.google_user_info:
-        user_info = st.session_state.google_user_info
-        st.markdown("---**User**---")
-        st.markdown(f"""<div class="user-info-container">
-            <img src="{user_info.get('picture', '')}" alt="User Pic">
-            <span>{user_info.get('email', 'Logged In')}</span>
-        </div>""", unsafe_allow_html=True)
-        if st.button("Logout", key="google_logout_btn", use_container_width=True):
-            st.session_state.google_auth_status = False
-            st.session_state.google_user_info = None
-            st.session_state.persistent_user_id = None
-            st.session_state.user_profile = None
-            st.session_state.google_auth_callback = None
-            if firebase_initialized: log_visitor_activity("Sidebar", "logout")
-            st.success("Logged out."); time.sleep(1); st.rerun()
-        st.markdown("------------")
+    # Removed User Info / Logout section as Google Sign-in is removed.
     
     if firebase_initialized: log_visitor_activity("Sidebar", "view")
     
@@ -1232,42 +1200,39 @@ with st.sidebar:
     # Run Forecast Button
     run_forecast_button = st.button("Run Forecast", key="run_forecast_main_btn", use_container_width=True)
     if run_forecast_button:
-        access_granted, message = check_feature_access()
-        if access_granted:
-            st.session_state.run_forecast_triggered = True
-            if st.session_state.cleaned_data is not None:
-                if model_choice == "Upload Custom .h5 Model" and not custom_model_file_obj_sidebar:
-                    st.error("Please upload a custom .h5 model file.")
-                    st.session_state.run_forecast_triggered = False
-                else:
-                    if firebase_initialized: log_visitor_activity("Sidebar", "run_forecast", feature_used='Forecast')
-                    with st.spinner(f"Running forecast ({model_choice})..."):
-                        forecast_df, metrics, history, scaler_obj = run_forecast_pipeline(
-                            st.session_state.cleaned_data, model_choice, forecast_horizon_sidebar, 
-                            custom_model_file_obj_sidebar, sequence_length_train_sidebar, epochs_train_sidebar, 
-                            mc_iterations_sidebar, use_custom_scaler_sidebar, custom_scaler_min_sidebar, custom_scaler_max_sidebar
-                        )
-                    st.session_state.forecast_results = forecast_df
-                    st.session_state.evaluation_metrics = metrics
-                    st.session_state.training_history = history
-                    st.session_state.scaler_object = scaler_obj
-                    
-                    if forecast_df is not None and metrics is not None:
-                        st.session_state.forecast_plot_fig = create_forecast_plot(st.session_state.cleaned_data, forecast_df)
-                        st.success("Forecast complete! Results updated.")
-                        st.session_state.ai_report = None; st.session_state.chat_history = []; st.session_state.chat_active = False
-                        st.session_state.active_tab = 1
-                        st.rerun()
-                    else:
-                        st.error("Forecast pipeline failed. Check messages.")
-                        st.session_state.forecast_results = None; st.session_state.evaluation_metrics = None
-                        st.session_state.training_history = None; st.session_state.forecast_plot_fig = None
-            else:
-                st.error("Please upload data first.")
+        # Feature access is now unlimited, so no check needed
+        st.session_state.run_forecast_triggered = True
+        if st.session_state.cleaned_data is not None:
+            if model_choice == "Upload Custom .h5 Model" and not custom_model_file_obj_sidebar:
+                st.error("Please upload a custom .h5 model file.")
                 st.session_state.run_forecast_triggered = False
+            else:
+                if firebase_initialized: log_visitor_activity("Sidebar", "run_forecast", feature_used='Forecast')
+                with st.spinner(f"Running forecast ({model_choice})..."):
+                    forecast_df, metrics, history, scaler_obj = run_forecast_pipeline(
+                        st.session_state.cleaned_data, model_choice, forecast_horizon_sidebar, 
+                        custom_model_file_obj_sidebar, sequence_length_train_sidebar, epochs_train_sidebar, 
+                        mc_iterations_sidebar, use_custom_scaler_sidebar, custom_scaler_min_sidebar, custom_scaler_max_sidebar
+                    )
+                st.session_state.forecast_results = forecast_df
+                st.session_state.evaluation_metrics = metrics
+                st.session_state.training_history = history
+                st.session_state.scaler_object = scaler_obj
+                
+                if forecast_df is not None and metrics is not None:
+                    st.session_state.forecast_plot_fig = create_forecast_plot(st.session_state.cleaned_data, forecast_df)
+                    st.success("Forecast complete! Results updated.")
+                    st.session_state.ai_report = None; st.session_state.chat_history = []; st.session_state.chat_active = False
+                    st.session_state.active_tab = 1 # Switch to Forecast Results tab
+                    st.rerun()
+                else:
+                    st.error("Forecast pipeline failed. Check messages.")
+                    st.session_state.forecast_results = None; st.session_state.evaluation_metrics = None
+                    st.session_state.training_history = None; st.session_state.forecast_plot_fig = None
         else:
-            show_google_login_button()
-            if firebase_initialized: log_visitor_activity("Sidebar", "run_forecast_denied", feature_used='Forecast')
+            st.error("Please upload data first.")
+            st.session_state.run_forecast_triggered = False
+
 
     st.header("3. AI Analysis")
     st.session_state.report_language = st.selectbox("Report Language", ["English", "French"], key="report_lang_select", disabled=not gemini_configured)
@@ -1275,25 +1240,21 @@ with st.sidebar:
     # Generate AI Report Button
     generate_report_button = st.button("Generate AI Report", key="show_report_btn", disabled=not gemini_configured, use_container_width=True)
     if generate_report_button:
-        access_granted, message = check_feature_access()
-        if access_granted:
-            if not gemini_configured: st.error("AI Report disabled. Configure Gemini API Key.")
-            elif st.session_state.cleaned_data is not None and st.session_state.forecast_results is not None and st.session_state.evaluation_metrics is not None:
-                if firebase_initialized: log_visitor_activity("Sidebar", "generate_report", feature_used='AI Report')
-                with st.spinner(f"Generating AI report ({st.session_state.report_language})..."):
-                    st.session_state.ai_report = generate_gemini_report(
-                        st.session_state.cleaned_data, st.session_state.forecast_results,
-                        st.session_state.evaluation_metrics, st.session_state.report_language
-                    )
-                if st.session_state.ai_report and not st.session_state.ai_report.startswith("Error:"):
-                    st.success("AI report generated.")
-                    st.session_state.active_tab = 3
-                    st.rerun()
-                else: st.error(f"Failed to generate AI report. {st.session_state.ai_report}")
-            else: st.error("Data, forecast, and metrics needed. Run forecast first.")
-        else:
-            show_google_login_button()
-            if firebase_initialized: log_visitor_activity("Sidebar", "generate_report_denied", feature_used='AI Report')
+        # Feature access is now unlimited, no check needed
+        if not gemini_configured: st.error("AI Report disabled. Configure Gemini API Key.")
+        elif st.session_state.cleaned_data is not None and st.session_state.forecast_results is not None and st.session_state.evaluation_metrics is not None:
+            if firebase_initialized: log_visitor_activity("Sidebar", "generate_report", feature_used='AI Report')
+            with st.spinner(f"Generating AI report ({st.session_state.report_language})..."):
+                st.session_state.ai_report = generate_gemini_report(
+                    st.session_state.cleaned_data, st.session_state.forecast_results,
+                    st.session_state.evaluation_metrics, st.session_state.report_language
+                )
+            if st.session_state.ai_report and not st.session_state.ai_report.startswith("Error:"):
+                st.success("AI report generated.")
+                st.session_state.active_tab = 3 # Switch to AI Report tab
+                st.rerun()
+            else: st.error(f"Failed to generate AI report. {st.session_state.ai_report}")
+        else: st.error("Data, forecast, and metrics needed. Run forecast first.")
 
     # Download PDF Button
     if st.button("Download Report (PDF)", key="download_report_btn", use_container_width=True):
@@ -1304,16 +1265,21 @@ with st.sidebar:
                     pdf = FPDF(); pdf.add_page()
                     
                     # Set font for professional look
-                    font_path_montserrat = "/usr/share/fonts/truetype/montserrat/Montserrat-Regular.ttf" # Example path, adjust as needed
-                    font_path_montserrat_bold = "/usr/share/fonts/truetype/montserrat/Montserrat-Bold.ttf" # Example path, adjust as needed
-                    report_font = "Montserrat"
+                    # These paths are illustrative. For deployment, ensure fonts are available in the environment.
+                    # For a truly portable solution without font file paths, fallback to built-in Arial.
+                    font_path_montserrat_regular = "/usr/share/fonts/truetype/montserrat/Montserrat-Regular.ttf" 
+                    font_path_montserrat_bold = "/usr/share/fonts/truetype/montserrat/Montserrat-Bold.ttf" 
+                    report_font = "Arial" # Default fallback
                     try:
-                        pdf.add_font("Montserrat", fname=font_path_montserrat, uni=True)
-                        pdf.add_font("Montserrat", "B", fname=font_path_montserrat_bold, uni=True)
+                        # Check if font files exist before adding
+                        if os.path.exists(font_path_montserrat_regular) and os.path.exists(font_path_montserrat_bold):
+                            pdf.add_font("Montserrat", fname=font_path_montserrat_regular, uni=True)
+                            pdf.add_font("Montserrat", "B", fname=font_path_montserrat_bold, uni=True)
+                            report_font = "Montserrat"
+                        else:
+                            st.warning(f"Montserrat font files not found, using Arial for PDF. Paths checked: {font_path_montserrat_regular}, {font_path_montserrat_bold}")
                     except RuntimeError as font_err:
-                        st.warning(f"Could not load Montserrat font ({font_err}), falling back to Arial. Ensure font files are available.")
-                        report_font = "Arial"
-                        pdf.set_font(report_font, size=12) # Set Arial if Montserrat fails
+                        st.warning(f"Failed to add Montserrat font ({font_err}), using Arial.")
                     
                     pdf.set_font(report_font, "B", size=16)
                     pdf.cell(0, 10, txt="DeepHydro AI Forecasting Report", new_x="LMARGIN", new_y="NEXT", align="C")
@@ -1406,14 +1372,10 @@ with st.sidebar:
             if firebase_initialized: log_visitor_activity("Sidebar", "deactivate_chat")
             st.rerun()
         else:
-            access_granted, message = check_feature_access()
-            if access_granted:
-                st.session_state.chat_active = True; st.session_state.active_tab = 4
-                if firebase_initialized: log_visitor_activity("Sidebar", "activate_chat", feature_used='AI Chat')
-                st.rerun()
-            else:
-                show_google_login_button()
-                if firebase_initialized: log_visitor_activity("Sidebar", "activate_chat_denied", feature_used='AI Chat')
+            # Feature access is now unlimited, no check needed
+            st.session_state.chat_active = True; st.session_state.active_tab = 4
+            if firebase_initialized: log_visitor_activity("Sidebar", "activate_chat", feature_used='AI Chat')
+            st.rerun()
 
     # About Us
     st.markdown('<div class="about-us-header">👥 About Us</div>', unsafe_allow_html=True)
@@ -1431,16 +1393,14 @@ with st.sidebar:
         st.rerun()
 
 # --- Main Application Area --- 
-st.title("DeepHydro AI Forecasting")
+st.markdown("<h1 class='blue-text'>DeepHydro AI Forecasting</h1>", unsafe_allow_html=True)
 if firebase_initialized: log_visitor_activity("Main Page", "view")
 
 # App Introduction
 st.markdown(f"""
 <div class="app-intro">
-    <h3>Welcome to DeepHydro AI Forecasting</h3>
-    Advanced groundwater forecasting platform using deep learning.
-    <span class="blue-text"><b>Features</b></span>: AI forecasting, MC Dropout uncertainty, AI interpretation, Interactive visualization.
-    Upload your data to begin.
+    <h3>Revolutionizing Water Management with <span class="blue-text">AI</span></h3>
+    Unlock insights into future water resources. Our platform leverages advanced <span class="blue-text">Deep learning</span> and <span class="blue-text">Data analysis</span> to provide precise <span class="blue-text">Hydrogeology</span> forecasts, crucial for the <span class="blue-text">protection of national water sources</span> and strategic planning. Experience the power of predictive <span class="blue-text">AI</span> for sustainable water management.
 </div>
 """, unsafe_allow_html=True)
 
@@ -1467,7 +1427,7 @@ if uploaded_data_file is not None:
             if firebase_initialized: log_visitor_activity("Data Upload", "upload_failure")
 
 # Define tabs
-tab_titles = ["Data Preview", "Forecast Results", "Model Evaluation", "AI Report", "AI Chatbot", "Admin Analytics"]
+tab_titles = ["Data Preview", "Forecast Results", "Model Evaluation", "Data Analysis & Statistics", "AI Report", "AI Chatbot", "Admin Analytics"]
 tabs = st.tabs(tab_titles)
 active_tab_index = st.session_state.get("active_tab", 0)
 
@@ -1484,7 +1444,7 @@ with tabs[0]:
         with col1: st.metric("Time Range", f"{st.session_state.cleaned_data['Date'].min():%Y-%m-%d} to {st.session_state.cleaned_data['Date'].max():%Y-%m-%d}")
         with col2: st.metric("Data Points", len(st.session_state.cleaned_data))
         fig_data = go.Figure()
-        fig_data.add_trace(go.Scatter(x=st.session_state.cleaned_data["Date"], y=st.session_state.cleaned_data["Level"], mode="lines", name="Level"))
+        fig_data.add_trace(go.Scatter(x=st.session_state.cleaned_data["Date"], y=st.session_state.cleaned_data["Level"], mode="lines", name="Level", line=dict(color="rgb(30, 144, 255)"))) # DodgerBlue
         fig_data.update_layout(title="Historical Groundwater Levels", xaxis_title="Date", yaxis_title="Level", template="plotly_white", margin=dict(l=20, r=20, t=40, b=20), height=400)
         st.plotly_chart(fig_data, use_container_width=True)
     else:
@@ -1546,8 +1506,13 @@ with tabs[2]:
     elif st.session_state.run_forecast_triggered: st.warning("Forecast run attempted, but no evaluation metrics available.")
     else: st.info("Run a forecast (sidebar) to see evaluation.")
 
-# AI Report Tab
+# New: Data Analysis & Statistics Tab
 with tabs[3]:
+    if firebase_initialized: log_visitor_activity("Tab: Data Analysis & Statistics", "view")
+    render_data_analysis_tab(st.session_state.cleaned_data, st.session_state.forecast_results)
+
+# AI Report Tab (shifted from index 3 to 4)
+with tabs[4]:
     if firebase_initialized: log_visitor_activity("Tab: AI Report", "view")
     st.header("AI-Generated Scientific Report")
     if not gemini_configured: st.warning("AI features disabled. Configure Gemini API Key.")
@@ -1555,8 +1520,8 @@ with tabs[3]:
         st.markdown(f'<div class="chat-message ai-message">{st.session_state.ai_report}<span class="copy-tooltip">Copied!</span></div>', unsafe_allow_html=True)
     else: st.info("Click 'Generate AI Report' (sidebar) after a forecast.")
 
-# AI Chatbot Tab
-with tabs[4]:
+# AI Chatbot Tab (shifted from index 4 to 5)
+with tabs[5]:
     if firebase_initialized: log_visitor_activity("Tab: AI Chatbot", "view")
     st.header("AI Chatbot Assistant")
     if not gemini_configured: st.warning("AI features disabled. Configure Gemini API Key.")
@@ -1587,16 +1552,12 @@ with tabs[4]:
     else:
         st.info("Click 'Activate Chat' (sidebar) after a forecast." if gemini_configured else "AI Chat disabled.")
 
-# Admin Analytics Tab
-with tabs[5]:
+# Admin Analytics Tab (shifted from index 5 to 6)
+with tabs[6]:
     if firebase_initialized: log_visitor_activity("Tab: Admin Analytics", "view")
     render_admin_analytics()
 
 # Synchronize tab selection
 if st.session_state.active_tab is not None and active_tab_index != st.session_state.active_tab:
-    # This block ensures the correct tab is displayed if changed by sidebar actions
     tabs[st.session_state.active_tab].button("Refresh Tab", key=f"refresh_tab_{st.session_state.active_tab}", on_click=lambda: st.session_state.update(active_tab=st.session_state.active_tab))
-    # Note: Streamlit's tab mechanism directly setting active_tab might not be ideal
-    # for programmatic changes without a rerun. The current structure with st.rerun()
-    # after a tab change in sidebar actions is the most straightforward.
 
