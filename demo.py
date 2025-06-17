@@ -319,15 +319,20 @@ def get_custom_css():
     .sidebar h2 {
         font-size: 1.2rem;
     }
+    /* Style for sidebar buttons - RED COLOR */
     .sidebar .stButton>button {
         border-radius: 4px;
         font-weight: 500;
         transition: all 0.3s;
         padding: 0.5rem 1rem;
+        background-color: #E74C3C; /* Red color for sidebar buttons */
+        color: white; /* White text on red background */
+        border: 1px solid #E74C3C; /* Red border */
     }
     .sidebar .stButton>button:hover {
-        opacity: 0.8;
+        opacity: 0.9;
         box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        transform: translateY(-1px); /* Slight lift on hover */
     }
     .sidebar .stFileUploader, .sidebar .stSelectbox, .sidebar .stNumberInput, .sidebar .stCheckbox {
         margin-bottom: 0.8rem; /* Consistent spacing */
@@ -1086,6 +1091,48 @@ def render_data_analysis_tab(cleaned_data, forecast_results):
                             template="plotly_white")
     st.plotly_chart(fig_hist, use_container_width=True)
 
+    # Rolling Mean and Standard Deviation for Historical Data
+    st.subheader("Historical Data Trends: Rolling Statistics")
+    window_size = st.slider("Select rolling window size (days/points)", min_value=7, max_value=90, value=30, key="rolling_window_slider")
+    
+    if len(cleaned_data) >= window_size:
+        cleaned_data_rolling = cleaned_data.copy()
+        cleaned_data_rolling['Rolling Mean'] = cleaned_data_rolling['Level'].rolling(window=window_size).mean()
+        cleaned_data_rolling['Rolling Std'] = cleaned_data_rolling['Level'].rolling(window=window_size).std()
+
+        fig_rolling = go.Figure()
+        fig_rolling.add_trace(go.Scatter(x=cleaned_data_rolling["Date"], y=cleaned_data_rolling["Level"],
+                                         mode="lines", name="Original Level", line=dict(color="lightgray", width=0.5)))
+        fig_rolling.add_trace(go.Scatter(x=cleaned_data_rolling["Date"], y=cleaned_data_rolling["Rolling Mean"],
+                                         mode="lines", name=f"Rolling Mean ({window_size} days)", line=dict(color="rgb(30, 144, 255)", width=2)))
+        fig_rolling.add_trace(go.Scatter(x=cleaned_data_rolling["Date"], y=cleaned_data_rolling["Rolling Std"],
+                                         mode="lines", name=f"Rolling Std Dev ({window_size} days)", line=dict(color="rgb(255, 127, 14)", dash='dash')))
+        fig_rolling.update_layout(title=f"Historical Groundwater Levels with Rolling Mean & Std Dev ({window_size}-point Window)",
+                                  xaxis_title="Date", yaxis_title="Groundwater Level", hovermode="x unified", template="plotly_white")
+        st.plotly_chart(fig_rolling, use_container_width=True)
+    else:
+        st.info(f"Not enough data points ({len(cleaned_data)}) for a rolling window of {window_size}. Increase data or decrease window size.")
+
+
+    # Extreme Values
+    st.subheader("Extreme Values in Historical Data")
+    min_level = cleaned_data['Level'].min()
+    max_level = cleaned_data['Level'].max()
+    min_date = cleaned_data.loc[cleaned_data['Level'].idxmin()]['Date'].strftime('%Y-%m-%d')
+    max_date = cleaned_data.loc[cleaned_data['Level'].idxmax()]['Date'].strftime('%Y-%m-%d')
+
+    col_min, col_max = st.columns(2)
+    with col_min:
+        st.metric("Minimum Level Recorded", f"{min_level:.2f}", help=f"Recorded on {min_date}")
+    with col_max:
+        st.metric("Maximum Level Recorded", f"{max_level:.2f}", help=f"Recorded on {max_date}")
+
+    st.subheader("Quantile Analysis for Historical Data")
+    quantiles_historical = cleaned_data['Level'].quantile([0.25, 0.5, 0.75]).to_frame(name='Historical Level')
+    quantiles_historical.index = ['25th Percentile (Q1)', '50th Percentile (Median)', '75th Percentile (Q3)']
+    st.dataframe(quantiles_historical)
+
+
     if forecast_results is not None:
         st.subheader("Forecasted Data Overview")
         st.dataframe(forecast_results[['Forecast', 'Lower_CI', 'Upper_CI']].describe().transpose())
@@ -1097,12 +1144,21 @@ def render_data_analysis_tab(cleaned_data, forecast_results):
         st.plotly_chart(fig_forecast_hist, use_container_width=True)
 
         st.subheader("Historical vs. Forecasted Data Comparison")
-        # Combine data for comparison plot
-        combined_df = pd.DataFrame({
+        # Combined Box Plot
+        combined_level_data = pd.DataFrame({
             'Level': pd.concat([cleaned_data['Level'], forecast_results['Forecast']]),
             'Type': ['Historical'] * len(cleaned_data) + ['Forecast'] * len(forecast_results)
         })
-        fig_combined_dist = px.histogram(combined_df, x="Level", color="Type", histnorm='probability density',
+        fig_boxplot = px.box(combined_level_data, x="Type", y="Level",
+                             title="Distribution Comparison: Historical vs. Forecasted Levels",
+                             labels={"Level": "Groundwater Level", "Type": "Data Type"},
+                             color="Type",
+                             color_discrete_map={'Historical': "rgb(30, 144, 255)", 'Forecast': "rgb(255, 127, 14)"},
+                             template="plotly_white")
+        st.plotly_chart(fig_boxplot, use_container_width=True)
+
+        # Combined Histogram (Density)
+        fig_combined_dist = px.histogram(combined_level_data, x="Level", color="Type", histnorm='probability density',
                                         barmode='overlay', opacity=0.7,
                                         title="Density Distribution: Historical vs. Forecasted Levels",
                                         labels={"Level": "Groundwater Level", "count": "Density"},
@@ -1122,6 +1178,11 @@ def render_data_analysis_tab(cleaned_data, forecast_results):
         with col3:
             st.metric("Historical Range", f"{cleaned_data['Level'].max() - cleaned_data['Level'].min():.2f}")
             st.metric("Forecast Range", f"{forecast_results['Forecast'].max() - forecast_results['Forecast'].min():.2f}")
+
+        st.subheader("Quantile Analysis for Forecasted Data")
+        quantiles_forecasted = forecast_results['Forecast'].quantile([0.25, 0.5, 0.75]).to_frame(name='Forecasted Level')
+        quantiles_forecasted.index = ['25th Percentile (Q1)', '50th Percentile (Median)', '75th Percentile (Q3)']
+        st.dataframe(quantiles_forecasted)
 
     else:
         st.info("Run a forecast to see combined data analysis.")
@@ -1251,7 +1312,7 @@ with st.sidebar:
                 )
             if st.session_state.ai_report and not st.session_state.ai_report.startswith("Error:"):
                 st.success("AI report generated.")
-                st.session_state.active_tab = 3 # Switch to AI Report tab
+                st.session_state.active_tab = 4 # Switch to AI Report tab (now index 4)
                 st.rerun()
             else: st.error(f"Failed to generate AI report. {st.session_state.ai_report}")
         else: st.error("Data, forecast, and metrics needed. Run forecast first.")
@@ -1264,23 +1325,8 @@ with st.sidebar:
                 try:
                     pdf = FPDF(); pdf.add_page()
                     
-                    # Set font for professional look
-                    # These paths are illustrative. For deployment, ensure fonts are available in the environment.
-                    # For a truly portable solution without font file paths, fallback to built-in Arial.
-                    font_path_montserrat_regular = "/usr/share/fonts/truetype/montserrat/Montserrat-Regular.ttf" 
-                    font_path_montserrat_bold = "/usr/share/fonts/truetype/montserrat/Montserrat-Bold.ttf" 
-                    report_font = "Arial" # Default fallback
-                    try:
-                        # Check if font files exist before adding
-                        if os.path.exists(font_path_montserrat_regular) and os.path.exists(font_path_montserrat_bold):
-                            pdf.add_font("Montserrat", fname=font_path_montserrat_regular, uni=True)
-                            pdf.add_font("Montserrat", "B", fname=font_path_montserrat_bold, uni=True)
-                            report_font = "Montserrat"
-                        else:
-                            st.warning(f"Montserrat font files not found, using Arial for PDF. Paths checked: {font_path_montserrat_regular}, {font_path_montserrat_bold}")
-                    except RuntimeError as font_err:
-                        st.warning(f"Failed to add Montserrat font ({font_err}), using Arial.")
-                    
+                    # Set font for professional look to standard Arial to avoid font issues
+                    report_font = "Arial" 
                     pdf.set_font(report_font, "B", size=16)
                     pdf.cell(0, 10, txt="DeepHydro AI Forecasting Report", new_x="LMARGIN", new_y="NEXT", align="C")
                     pdf.set_font(report_font, size=10)
@@ -1292,7 +1338,8 @@ with st.sidebar:
                     plot_filename = "forecast_plot.png"
                     try:
                         if st.session_state.forecast_plot_fig:
-                            st.session_state.forecast_plot_fig.write_image(plot_filename, scale=2)
+                            # Save plot with higher scale for better quality in PDF
+                            st.session_state.forecast_plot_fig.write_image(plot_filename, scale=3) 
                             pdf.image(plot_filename, x=10, y=pdf.get_y(), w=190) # Adjust x, y, w for layout
                             pdf.ln(125) # Space after image, adjust based on image height
                         else: pdf.multi_cell(0, 10, txt="[Forecast plot unavailable]")
@@ -1373,7 +1420,7 @@ with st.sidebar:
             st.rerun()
         else:
             # Feature access is now unlimited, no check needed
-            st.session_state.chat_active = True; st.session_state.active_tab = 4
+            st.session_state.chat_active = True; st.session_state.active_tab = 5 # Changed to 5 for AI Chatbot
             if firebase_initialized: log_visitor_activity("Sidebar", "activate_chat", feature_used='AI Chat')
             st.rerun()
 
@@ -1389,7 +1436,7 @@ with st.sidebar:
     st.header("5. Admin")
     if st.button("Analytics Dashboard", key="admin_analytics_btn", use_container_width=True):
         if firebase_initialized: log_visitor_activity("Sidebar", "access_admin")
-        st.session_state.active_tab = 5
+        st.session_state.active_tab = 6 # Changed to 6 for Admin Analytics
         st.rerun()
 
 # --- Main Application Area --- 
@@ -1404,29 +1451,8 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# Handle data upload
-if uploaded_data_file is not None:
-    if st.session_state.get("uploaded_data_filename") != uploaded_data_file.name:
-        st.session_state.uploaded_data_filename = uploaded_data_file.name
-        with st.spinner("Loading and cleaning data..."): 
-            cleaned_df_result = load_and_clean_data(uploaded_data_file.getvalue())
-        if cleaned_df_result is not None:
-            st.session_state.cleaned_data = cleaned_df_result
-            # Reset results
-            st.session_state.forecast_results = None; st.session_state.evaluation_metrics = None
-            st.session_state.training_history = None; st.session_state.ai_report = None
-            st.session_state.chat_history = []; st.session_state.scaler_object = None
-            st.session_state.forecast_plot_fig = None
-            st.session_state.model_sequence_length = STANDARD_MODEL_SEQUENCE_LENGTH
-            st.session_state.run_forecast_triggered = False
-            if firebase_initialized: log_visitor_activity("Data Upload", "upload_success")
-            st.rerun()
-        else:
-            st.session_state.cleaned_data = None
-            st.error("Data loading failed. Check file format/content.")
-            if firebase_initialized: log_visitor_activity("Data Upload", "upload_failure")
-
 # Define tabs
+# Updated tab_titles to reflect new order
 tab_titles = ["Data Preview", "Forecast Results", "Model Evaluation", "Data Analysis & Statistics", "AI Report", "AI Chatbot", "Admin Analytics"]
 tabs = st.tabs(tab_titles)
 active_tab_index = st.session_state.get("active_tab", 0)
@@ -1506,12 +1532,12 @@ with tabs[2]:
     elif st.session_state.run_forecast_triggered: st.warning("Forecast run attempted, but no evaluation metrics available.")
     else: st.info("Run a forecast (sidebar) to see evaluation.")
 
-# New: Data Analysis & Statistics Tab
+# Data Analysis & Statistics Tab (now at index 3)
 with tabs[3]:
     if firebase_initialized: log_visitor_activity("Tab: Data Analysis & Statistics", "view")
     render_data_analysis_tab(st.session_state.cleaned_data, st.session_state.forecast_results)
 
-# AI Report Tab (shifted from index 3 to 4)
+# AI Report Tab (now at index 4)
 with tabs[4]:
     if firebase_initialized: log_visitor_activity("Tab: AI Report", "view")
     st.header("AI-Generated Scientific Report")
@@ -1520,7 +1546,7 @@ with tabs[4]:
         st.markdown(f'<div class="chat-message ai-message">{st.session_state.ai_report}<span class="copy-tooltip">Copied!</span></div>', unsafe_allow_html=True)
     else: st.info("Click 'Generate AI Report' (sidebar) after a forecast.")
 
-# AI Chatbot Tab (shifted from index 4 to 5)
+# AI Chatbot Tab (now at index 5)
 with tabs[5]:
     if firebase_initialized: log_visitor_activity("Tab: AI Chatbot", "view")
     st.header("AI Chatbot Assistant")
@@ -1552,7 +1578,7 @@ with tabs[5]:
     else:
         st.info("Click 'Activate Chat' (sidebar) after a forecast." if gemini_configured else "AI Chat disabled.")
 
-# Admin Analytics Tab (shifted from index 5 to 6)
+# Admin Analytics Tab (now at index 6)
 with tabs[6]:
     if firebase_initialized: log_visitor_activity("Tab: Admin Analytics", "view")
     render_admin_analytics()
