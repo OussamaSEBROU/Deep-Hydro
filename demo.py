@@ -1,12 +1,27 @@
 # -*- coding: utf-8 -*-
 """
-Updated DeepHydro AI Streamlit Application
+DeepHydro AI Streamlit Application - Investor-Ready Version
 
-Modifications:
-1. Refreshed user profile in session state after incrementing feature usage count in Firebase.
-2. Replaced user-facing instances of "LSTM" with "AI" or "Deep Learning".
-3. Removed unsupported 'key' argument from components.html calls.
-4. Refactored embedded CSS and JavaScript into separate functions for better structure.
+This application provides groundwater level forecasting using deep learning models,
+enhanced with AI-powered analysis and a professional-grade user interface.
+
+Key Features & Enhancements:
+1.  **Modular Architecture:** Refactored functions for better organization and maintainability.
+2.  **Enhanced UX/UI:**
+    * Modern, clean design with custom CSS for professional aesthetics.
+    * Responsive layout for various screen sizes.
+    * Improved loading indicators and user feedback.
+3.  **Core AI Forecasting:**
+    * Support for pre-trained, custom-uploaded, or newly-trained deep learning models.
+    * Monte Carlo Dropout for robust uncertainty quantification (Confidence Intervals).
+4.  **AI-Powered Insights (Gemini API):**
+    * Generates comprehensive, non-technical AI reports in multiple languages.
+    * Interactive AI Chatbot for deep dive Q&A on data and forecasts.
+5.  **Data Analysis Dashboard:** A new tab for generic data visualization and exploration of future datasets.
+6.  **Session Activity Log:** A user-facing dashboard to show actions taken within the current session, demonstrating activity tracking capabilities.
+7.  **PDF Report Generation:** Creates a downloadable PDF summarizing key findings, plots, and AI analysis.
+8.  **Removed Features:** Google Sign-in and Firebase integration have been removed per requirements.
+
 """
 
 import streamlit as st
@@ -20,522 +35,99 @@ from tensorflow.keras.models import Sequential, load_model
 from tensorflow.keras.layers import LSTM, Dropout, Dense
 from tensorflow.keras.callbacks import EarlyStopping
 import plotly.graph_objects as go
+import plotly.express as px
 from fpdf import FPDF
 import google.generativeai as genai
 import io
 import base64
 import time
 import os
-import json
+import json # Used for JSON dumps, not for Firebase config anymore
 import datetime
 import uuid
-import firebase_admin
-from firebase_admin import credentials, db
-import requests
-import plotly.express as px
-from dotenv import load_dotenv
 import hashlib
-import streamlit.components.v1 as components # Import components
+import streamlit.components.v1 as components
 
-# --- Constants ---
-ADVANCED_FEATURE_LIMIT = 5000004 # Updated limit to 5
+# --- Constants & Configuration ---
+# Set a default sequence length if standard model not found or cannot be loaded
+DEFAULT_MODEL_SEQUENCE_LENGTH = 60 
 
-# --- Firebase Configuration --- 
-def initialize_firebase():
-    """
-    Initialize Firebase with secure credential management.
-    Loads credentials from environment variables for secure deployment.
-    """
-    load_dotenv()
-    if not firebase_admin._apps:
-        try:
-            firebase_creds_json = os.getenv("FIREBASE_SERVICE_ACCOUNT")
-            if firebase_creds_json:
-                cred_dict = json.loads(firebase_creds_json)
-                cred = credentials.Certificate(cred_dict)
-                firebase_url = os.getenv("FIREBASE_DATABASE_URL", f"https://{cred_dict.get('project_id')}-default-rtdb.firebaseio.com/")
-                firebase_admin.initialize_app(cred, {
-                    "databaseURL": firebase_url
-                })
-                # st.success("Firebase initialized successfully.") # Optional: for debugging
-                return True
-            else:
-                st.warning("Firebase credentials not found. Analytics and usage tracking are disabled.")
-                return False
-        except Exception as e:
-            st.warning(f"Firebase initialization error: {e}. Analytics and usage tracking are disabled.")
-            return False
-    return True
+# Path to the pre-trained model (assume it's in the same directory as app.py)
+STANDARD_MODEL_PATH = "standard_model.h5"
 
-# --- User Identification & Tracking --- 
-def get_client_ip():
-    """Get the client's IP address if available."""
-    try:
-        # Use a reliable service to get IP
-        response = requests.get('https://httpbin.org/ip', timeout=3)
-        if response.status_code == 200:
-            return response.json().get('origin', 'Unknown')
-        return "Unknown"
-    except Exception:
-        return "Unknown"
+# --- Streamlit Page Configuration ---
+st.set_page_config(page_title="DeepHydro AI Forecasting", layout="wide", initial_sidebar_state="expanded")
 
-def get_persistent_user_id():
-    """Generate or retrieve a persistent user ID."""
-    # If logged in via Google, use the Google user ID
-    if st.session_state.get('google_auth_status') and st.session_state.get('google_user_info'):
-        user_id = st.session_state.google_user_info.get('id', st.session_state.google_user_info.get('email')) # Prefer Google ID if available
-        if user_id:
-            st.session_state.persistent_user_id = user_id
-            return user_id
-
-    # Fallback for anonymous users or if Google ID is missing
-    if 'persistent_user_id' in st.session_state and st.session_state.persistent_user_id and not st.session_state.persistent_user_id.startswith('anon_'):
-         # If already logged in previously, keep using that ID until Google login happens
-         if st.session_state.get('google_auth_status'): pass # Already handled above
-         else: return st.session_state.persistent_user_id
-
-    # For anonymous users, create a hashed ID
-    ip_address = get_client_ip()
-    user_agent = st.session_state.get('user_agent', 'Unknown')
-    
-    # Create a stable hash
-    hash_input = f"{ip_address}-{user_agent}"
-    hashed_id = hashlib.sha256(hash_input.encode()).hexdigest()
-    persistent_id = f"anon_{hashed_id}"
-    
-    # Only set if not already set or if the user is truly anonymous now
-    if 'persistent_user_id' not in st.session_state or st.session_state.persistent_user_id is None or st.session_state.persistent_user_id.startswith('anon_'):
-        st.session_state.persistent_user_id = persistent_id
-        
-    return st.session_state.persistent_user_id
-
-def get_or_create_user_profile(user_id):
-    """Get user profile from Firebase or create a new one."""
-    if not firebase_admin._apps:
-        return None, False # Indicate Firebase not available
-    
-    try:
-        ref = db.reference(f'users/{user_id}')
-        profile = ref.get()
-        is_new_user = False
-        if profile is None:
-            is_new_user = True
-            profile = {
-                'user_id': user_id,
-                'first_visit': datetime.datetime.now().isoformat(),
-                'visit_count': 1,
-                'is_authenticated': st.session_state.get('google_auth_status', False),
-                'feature_usage_count': 0,
-                'last_visit': datetime.datetime.now().isoformat(),
-                'google_user_info': st.session_state.get('google_user_info') # Store Google info if authenticated
-            }
-            ref.set(profile)
-            # st.info(f"Created new user profile for {user_id}") # Debug
-        else:
-            # Update visit count and last visit time if it's a new session
-            if 'session_visit_logged' not in st.session_state:
-                profile['visit_count'] = profile.get('visit_count', 0) + 1
-                profile['last_visit'] = datetime.datetime.now().isoformat()
-                # Update auth status and Google info if they logged in this session
-                profile['is_authenticated'] = st.session_state.get('google_auth_status', False)
-                if profile['is_authenticated']:
-                     profile['google_user_info'] = st.session_state.get('google_user_info')
-                ref.update({'visit_count': profile['visit_count'], 
-                            'last_visit': profile['last_visit'],
-                            'is_authenticated': profile['is_authenticated'],
-                            'google_user_info': profile.get('google_user_info')})
-                st.session_state.session_visit_logged = True # Mark visit as logged for this session
-                # st.info(f"Updated visit count for {user_id} to {profile['visit_count']}") # Debug
-            
-        return profile, is_new_user
-    except Exception as e:
-        st.warning(f"Firebase error getting/creating user profile for {user_id}: {e}")
-        return None, False
-
-def increment_feature_usage(user_id):
-    """Increment the feature usage count for the user in Firebase."""
-    if not firebase_admin._apps:
-        return False
-    
-    try:
-        ref = db.reference(f'users/{user_id}/feature_usage_count')
-        # Atomically increment the count
-        current_count = ref.get() or 0
-        new_count = current_count + 1
-        ref.set(new_count)
-        
-        # Update session state as well by fetching the updated profile
-        if 'user_profile' in st.session_state:
-            # Fetch the parent (user profile) data after update
-            updated_profile = ref.parent.get()
-            if updated_profile:
-                st.session_state.user_profile = updated_profile
-            else:
-                 # Fallback: update count locally if fetch fails
-                 if st.session_state.user_profile:
-                     st.session_state.user_profile['feature_usage_count'] = new_count
-        return True
-    except Exception as e:
-        st.warning(f"Firebase error incrementing usage count for {user_id}: {e}")
-        return False
-
-# --- Authentication Check & Google Login --- 
-def check_feature_access():
-    """Check if user can access advanced features based on usage count and auth status."""
-    if 'user_profile' not in st.session_state or st.session_state.user_profile is None:
-        # Try to fetch profile again if missing
-        user_id = get_persistent_user_id()
-        st.session_state.user_profile, _ = get_or_create_user_profile(user_id)
-        if st.session_state.user_profile is None:
-            st.warning("Could not retrieve user profile. Feature access may be limited.")
-            # Deny access if profile fetch fails.
-            return False, "Cannot verify usage limit. Access denied."
-
-    usage_count = st.session_state.user_profile.get('feature_usage_count', 0)
-    is_authenticated = st.session_state.get('google_auth_status', False)
-
-    if is_authenticated:
-        return True, "Access granted (Authenticated)."
-    elif usage_count < ADVANCED_FEATURE_LIMIT: # Use the updated constant
-        return True, f"Access granted (Usage: {usage_count}/{ADVANCED_FEATURE_LIMIT})."
-    else:
-        return False, f"Usage limit ({ADVANCED_FEATURE_LIMIT}) reached. Please log in with Google to continue."
-
-# Placeholder for Google Sign-In component
-def show_google_login_button():
-    """Displays the Google Sign-In button and handles the callback."""
-    st.warning(f"Usage limit ({ADVANCED_FEATURE_LIMIT}) reached for advanced features.")
-    st.info("Please log in with Google to continue using AI Report, Forecasting, and AI Chat.")
-    
-    google_client_id = os.getenv("GOOGLE_CLIENT_ID")
-    if not google_client_id:
-        st.error("Google Client ID not configured. Cannot enable Google Sign-In. Set GOOGLE_CLIENT_ID environment variable.")
-        return
-
-    # Use components.html for Google Sign-In button
-    # Removed the 'key' argument as it's not supported by components.html
-    components.html(f"""
-        <script src="https://accounts.google.com/gsi/client" async defer></script>
-        <div id="g_id_onload"
-             data-client_id="{google_client_id}"
-             data-callback="handleCredentialResponse"
-             data-auto_prompt="false">
-        </div>
-        <div class="g_id_signin"
-             data-type="standard"
-             data-size="large"
-             data-theme="outline"
-             data-text="sign_in_with"
-             data-shape="rectangular"
-             data-logo_alignment="left">
-        </div>
-        <script>
-          function handleCredentialResponse(response) {{
-            /* Send the credential to Streamlit backend */
-            console.log("Encoded JWT ID token: " + response.credential);
-            window.parent.postMessage({{
-                'type': 'streamlit:setComponentValue',
-                'key': 'google_auth_callback', /* Key used by Streamlit to retrieve value */
-                'value': response.credential
-            }}, '*');
-          }}
-        </script>
-        """, height=100)
-
-    # Handle the callback value from the component
-    # Streamlit uses the 'key' in postMessage to store the value in session_state
-    credential_token = st.session_state.get('google_auth_callback')
-    if credential_token:
-        # --- IMPORTANT SECURITY NOTE --- 
-        # Decoding the JWT and verifying it SHOULD happen server-side.
-        # For this example, we'll simulate decoding.
-        try:
-            import jwt # Requires PyJWT: pip install pyjwt
-            # --- Placeholder for User Info (Replace with actual verified token info) ---
-            decoded_token = {
-                'email': 'user@example.com', 
-                'name': 'Test User',        
-                'picture': 'https://lh3.googleusercontent.com/a/ACg8ocJ9...=s96-c', 
-                'sub': '12345678901234567890' 
-            }
-            # --- End Placeholder --- 
-            
-            st.session_state.google_auth_status = True
-            st.session_state.google_user_info = {
-                'id': decoded_token.get('sub'),
-                'email': decoded_token.get('email'),
-                'name': decoded_token.get('name'),
-                'picture': decoded_token.get('picture')
-            }
-            st.session_state.persistent_user_id = st.session_state.google_user_info.get('id', st.session_state.google_user_info.get('email'))
-            
-            # Update Firebase profile
-            user_id = get_persistent_user_id()
-            profile, _ = get_or_create_user_profile(user_id)
-            if profile:
-                try:
-                    ref = db.reference(f'users/{user_id}')
-                    update_data = {
-                        'is_authenticated': True,
-                        'google_user_info': st.session_state.google_user_info,
-                        'last_login_google': datetime.datetime.now().isoformat()
-                    }
-                    if profile.get('visit_count', 0) <= 1:
-                         update_data['first_visit'] = profile.get('first_visit', datetime.datetime.now().isoformat())
-                         update_data['visit_count'] = 1
-                         update_data['feature_usage_count'] = profile.get('feature_usage_count', 0)
-                         
-                    ref.update(update_data)
-                    st.session_state.user_profile = ref.get() # Refresh profile
-                    st.success("Google login successful! Advanced features unlocked.")
-                    st.session_state.google_auth_callback = None # Clear callback value
-                    time.sleep(1.5)
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Firebase error updating profile after login: {e}")
-            else:
-                 st.error("Could not update user profile after login.")
-                 
-        except Exception as e:
-            st.error(f"Error processing Google Sign-In: {e}")
-            st.session_state.google_auth_callback = None
-
-# --- Visitor Analytics Functions --- 
-def get_session_id():
-    """Create or retrieve a unique session ID."""
-    if 'session_id' not in st.session_state:
-        st.session_state.session_id = str(uuid.uuid4())
-    return st.session_state.session_id
-
-def log_visitor_activity(page_name, action="page_view", feature_used=None):
-    """Log visitor activity to Firebase."""
-    if not firebase_admin._apps:
-        return
-    try:
-        user_id = get_persistent_user_id()
-        profile, _ = get_or_create_user_profile(user_id)
-        
-        should_increment = feature_used in ['Forecast', 'AI Report', 'AI Chat']
-        access_granted, _ = check_feature_access()
-        
-        if should_increment:
-            if access_granted:
-                increment_feature_usage(user_id)
-            else:
-                action = f"denied_{action}"
-
-        ref = db.reference('visitors_log') 
-        log_id = str(uuid.uuid4())
-        timestamp = datetime.datetime.now().isoformat()
-        session_id = get_session_id()
-        user_agent = st.session_state.get('user_agent', 'Unknown')
-        ip_address = get_client_ip() 
-        is_authenticated = st.session_state.get('google_auth_status', False)
-
-        log_data = {
-            'timestamp': timestamp,
-            'persistent_user_id': user_id,
-            'is_authenticated': is_authenticated,
-            'visit_count': profile.get('visit_count', 1) if profile else 1,
-            'ip_address': ip_address,
-            'page': page_name,
-            'action': action,
-            'feature_used': feature_used,
-            'session_id': session_id,
-            'user_agent': user_agent,
-            'google_email': st.session_state.google_user_info.get('email') if is_authenticated else None
-        }
-        ref.child(log_id).set(log_data)
-    except Exception as e:
-        pass # Silently fail logging
-
-def fetch_visitor_logs():
-    """Fetch visitor logs from Firebase."""
-    if not firebase_admin._apps:
-        return pd.DataFrame()
-    try:
-        ref = db.reference('visitors_log')
-        visitors_data = ref.get()
-        if not visitors_data: return pd.DataFrame()
-        visitors_list = [dict(log_id=log_id, **data) for log_id, data in visitors_data.items()]
-        df = pd.DataFrame(visitors_list)
-        df['timestamp'] = pd.to_datetime(df['timestamp'])
-        df = df.sort_values('timestamp', ascending=False)
-        return df
-    except Exception as e:
-        st.error(f"Error fetching visitor logs: {e}")
-        return pd.DataFrame()
-
-def create_visitor_charts(visitor_df):
-    """Create visualizations of visitor data."""
-    if visitor_df.empty: return []
-    figures = []
-    try:
-        df = visitor_df.copy()
-        df['date'] = df['timestamp'].dt.date
-        
-        # Daily visitors
-        daily_visitors = df.groupby('date')['persistent_user_id'].nunique().reset_index(name='unique_users')
-        daily_visitors['date'] = pd.to_datetime(daily_visitors['date'])
-        fig1 = px.line(daily_visitors, x='date', y='unique_users', title='Daily Unique Visitors', labels={'unique_users': 'Unique Users', 'date': 'Date'})
-        figures.append(fig1)
-        
-        # Action counts
-        action_counts = df['action'].value_counts().reset_index()
-        action_counts.columns = ['action', 'count']
-        fig2 = px.bar(action_counts, x='action', y='count', title='Activity Counts by Action', labels={'count': 'Number of Times', 'action': 'Action Type'})
-        figures.append(fig2)
-
-        # Auth status
-        latest_status = df.sort_values('timestamp').groupby('persistent_user_id')['is_authenticated'].last().reset_index()
-        auth_counts = latest_status['is_authenticated'].value_counts().reset_index()
-        auth_counts.columns = ['is_authenticated', 'count']
-        auth_counts['status'] = auth_counts['is_authenticated'].map({True: 'Authenticated (Google)', False: 'Anonymous'})
-        fig3 = px.pie(auth_counts, values='count', names='status', title='User Authentication Status (Latest Known)')
-        figures.append(fig3)
-
-        # Hourly activity heatmap
-        try:
-            df['hour'] = df['timestamp'].dt.hour
-            df['day_of_week'] = df['timestamp'].dt.day_name()
-            day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-            hourly_activity = df.groupby(['day_of_week', 'hour']).size().reset_index(name='count')
-            
-            if len(hourly_activity) > 0:
-                hourly_pivot = hourly_activity.pivot_table(values='count', index='day_of_week', columns='hour', fill_value=0)
-                available_days = set(hourly_pivot.index) & set(day_order)
-                ordered_available_days = [day for day in day_order if day in available_days]
-                hourly_pivot = hourly_pivot.reindex(ordered_available_days)
-                available_hours = sorted(hourly_pivot.columns)
-                fig4 = px.imshow(hourly_pivot, labels=dict(x="Hour of Day", y="Day of Week", color="Activity Count"),
-                                x=[str(h) for h in available_hours], y=ordered_available_days, title="Visitor Activity by Hour and Day")
-                figures.append(fig4)
-            else:
-                fig4 = go.Figure().update_layout(title="Visitor Activity by Hour and Day (No Data)")
-                fig4.add_annotation(text="Not enough data", xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
-                figures.append(fig4)
-        except Exception as heatmap_err:
-            st.warning(f"Could not generate hourly activity heatmap: {heatmap_err}")
-            fig4 = go.Figure().update_layout(title="Visitor Activity by Hour and Day (Error)")
-            fig4.add_annotation(text="Error generating heatmap", xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
-            figures.append(fig4)
-            
-    except Exception as e:
-        st.error(f"Error creating visitor charts: {e}")
-        return []
-    return figures
-
-# --- Admin Analytics Dashboard --- 
-def render_admin_analytics():
-    """Render the admin analytics dashboard."""
-    st.header("Admin Analytics Dashboard")
-    if 'admin_authenticated' not in st.session_state: st.session_state.admin_authenticated = False
-    
-    if not st.session_state.admin_authenticated:
-        st.info("Admin access required.")
-        admin_password = st.text_input("Admin Password", type="password", key="admin_pass_input")
-        if st.button("Login", key="admin_login_btn"):
-            correct_password = os.getenv("ADMIN_PASSWORD", "admin123")
-            if admin_password == correct_password:
-                st.session_state.admin_authenticated = True
-                st.rerun()
-            else: st.error("Invalid password")
-    else:
-        visitor_df = fetch_visitor_logs()
-        if visitor_df.empty: st.info("No visitor data available yet."); return
-        
-        st.subheader("Visitor Statistics")
-        col1, col2, col3 = st.columns(3)
-        with col1: st.metric("Total Activities Logged", len(visitor_df))
-        with col2: st.metric("Unique Visitors", visitor_df['persistent_user_id'].nunique())
-        with col3:
-            if 'date' not in visitor_df.columns: visitor_df['date'] = visitor_df['timestamp'].dt.date
-            today = datetime.datetime.now().date()
-            today_visitors = visitor_df[visitor_df['date'] == today]['persistent_user_id'].nunique()
-            st.metric("Today's Unique Visitors", today_visitors)
-        
-        st.subheader("Visitor Analytics")
-        try:
-            charts = create_visitor_charts(visitor_df)
-            for fig in charts: st.plotly_chart(fig, use_container_width=True)
-        except Exception as chart_err: st.error(f"Error displaying charts: {chart_err}")
-        
-        st.subheader("Raw Visitor Data")
-        col1_filter, col2_filter = st.columns(2)
-        with col1_filter:
-            try:
-                min_date, max_date = visitor_df['timestamp'].min().date(), visitor_df['timestamp'].max().date()
-                date_range = st.date_input("Date Range", [min_date, max_date], min_value=min_date, max_value=max_date, key="admin_date_filter")
-            except Exception: date_range = None
-        with col2_filter:
-            try:
-                user_id_options = ['All'] + visitor_df['persistent_user_id'].unique().tolist()
-                user_id_filter = st.selectbox("Filter by User ID", options=user_id_options, index=0, key="admin_user_filter")
-            except Exception: user_id_filter = 'All'
-        
-        try:
-            filtered_df = visitor_df.copy()
-            if date_range and len(date_range) == 2:
-                start_date, end_date = date_range
-                filtered_df = filtered_df[(filtered_df['timestamp'].dt.date >= start_date) & (filtered_df['timestamp'].dt.date <= end_date)]
-            if user_id_filter != 'All':
-                filtered_df = filtered_df[filtered_df['persistent_user_id'] == user_id_filter]
-            
-            display_cols = ['timestamp', 'persistent_user_id', 'is_authenticated', 'google_email', 'visit_count', 'page', 'action', 'feature_used', 'ip_address', 'session_id']
-            st.dataframe(filtered_df[[col for col in display_cols if col in filtered_df.columns]])
-            
-            if st.button("Export Filtered to CSV", key="admin_export_btn"):
-                csv = filtered_df[[col for col in display_cols if col in filtered_df.columns]].to_csv(index=False)
-                b64 = base64.b64encode(csv.encode()).decode()
-                href = f'<a href="data:file/csv;base64,{b64}" download="filtered_visitor_logs.csv">Download CSV File</a>'
-                st.markdown(href, unsafe_allow_html=True)
-        except Exception as filter_err:
-            st.error(f"Error applying filters or displaying data: {filter_err}")
-            st.dataframe(visitor_df[['timestamp', 'persistent_user_id', 'action']])
-
-# --- UI Assets --- 
-# Suggestion: For larger apps, consider loading CSS/JS from external files 
-# (e.g., assets/style.css, assets/script.js) for better organization.
-# Example: 
-# def load_asset(file_path):
-#     try:
-#         with open(file_path, 'r') as f:
-#             return f.read()
-#     except FileNotFoundError:
-#         st.warning(f"Asset file not found: {file_path}")
-#         return ""
-# css_content = load_asset("assets/style.css")
-# js_content = load_asset("assets/script.js")
-
+# --- UI Assets (CSS and JavaScript) ---
 def get_custom_css():
     """Returns the custom CSS string for the application."""
     return """
     <style>
-    /* Sidebar style preservation */
-    .sidebar .block-container {
-        font-size: 0.9rem;
+    /* General Styles */
+    body {
+        font-family: 'Inter', sans-serif;
+        color: #333;
+        background-color: #f0f2f6; /* Light gray background */
     }
-    .sidebar h1 {
-        font-size: 1.4rem;
+
+    /* Streamlit Overrides */
+    .stApp {
+        background-color: #f0f2f6;
     }
-    .sidebar h2 {
-        font-size: 1.2rem;
+    .main .block-container {
+        padding-top: 1.5rem;
+        padding-bottom: 1.5rem;
+        padding-left: 2rem;
+        padding-right: 2rem;
     }
-    .sidebar .stButton>button {
-        border-radius: 4px;
+    .css-1d391kg, .css-12oz5g7 { /* Adjusting main content padding */
+        padding: 1rem;
+    } 
+
+    /* Headers */
+    h1, h2, h3, h4 {
+        color: #2c3e50; /* Darker blue-gray for headers */
+        font-weight: 600;
+        margin-top: 1.5rem;
+        margin-bottom: 0.8rem;
+    }
+    h1 { font-size: 2.2rem; }
+    h2 { font-size: 1.8rem; }
+    h3 { font-size: 1.4rem; }
+    h4 { font-size: 1.2rem; }
+
+    /* Buttons */
+    .stButton > button {
+        background-color: #3498db; /* Primary blue */
+        color: white;
+        border: none;
+        border-radius: 8px;
+        padding: 0.75rem 1.25rem;
         font-weight: 500;
-        transition: all 0.3s;
-        padding: 0.5rem 1rem;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        cursor: pointer;
+        width: 100%; /* Make buttons full width in sidebar */
     }
-    .sidebar .stButton>button:hover {
-        opacity: 0.8;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+    .stButton > button:hover {
+        background-color: #2980b9; /* Darker blue on hover */
+        box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
+        transform: translateY(-2px);
+    }
+    .stButton > button:active {
+        transform: translateY(0);
+        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    }
+
+    /* Sidebar specific styles */
+    .sidebar .stButton > button {
+        margin-bottom: 0.5rem;
     }
     .sidebar .stFileUploader, .sidebar .stSelectbox, .sidebar .stNumberInput, .sidebar .stCheckbox {
-        margin-bottom: 0.8rem; /* Consistent spacing */
+        margin-bottom: 0.8rem;
     }
     .sidebar .stNumberInput input {
-        font-size: 0.9rem; /* Slightly smaller input text */
+        font-size: 0.9rem;
     }
     .sidebar .stExpander {
         border: none;
@@ -545,62 +137,160 @@ def get_custom_css():
     .sidebar .stExpander header {
         padding: 0.5rem 0;
         font-weight: 500;
+        color: #2c3e50;
     }
     .sidebar .stExpander div[data-testid="stExpanderDetails"] {
         padding-left: 0.5rem;
     }
+
+    /* Custom Cards/Panels */
+    .card-container {
+        background-color: white;
+        border-radius: 12px;
+        padding: 1.5rem;
+        margin-bottom: 1.5rem;
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+        border: 1px solid #e0e0e0;
+    }
+    .app-intro {
+        background-color: #e3f2fd; /* Light blue background */
+        border-left: 5px solid #2196f3; /* Stronger blue border */
+        color: #2196f3;
+        padding: 1.5rem;
+        border-radius: 12px;
+        margin-bottom: 2rem;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+    }
+    .app-intro h3 {
+        color: #1976d2;
+        margin-top: 0;
+    }
+
+    /* Chat Messages */
+    .chat-message {
+        background-color: white;
+        padding: 1.2rem;
+        border-radius: 10px;
+        margin-bottom: 0.75rem;
+        position: relative;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+        transition: transform 0.2s ease;
+        cursor: pointer;
+    }
+    .chat-message:hover {
+        transform: translateY(-2px);
+    }
+    .user-message {
+        background-color: #e8f5e9; /* Light green */
+        border-left: 5px solid #4CAF50; /* Green accent */
+        color: #388E3C;
+        margin-left: 20%; /* Align right */
+    }
+    .ai-message {
+        background-color: #e3f2fd; /* Light blue */
+        border-left: 5px solid #2196f3; /* Blue accent */
+        color: #1976d2;
+        margin-right: 20%; /* Align left */
+    }
+    .copy-tooltip {
+        position: absolute;
+        bottom: 0.5rem;
+        right: 0.5rem;
+        padding: 0.3rem 0.6rem;
+        border-radius: 6px;
+        font-size: 0.75rem;
+        background-color: rgba(0, 0, 0, 0.7);
+        color: white;
+        opacity: 0;
+        visibility: hidden;
+        transition: opacity 0.3s ease, visibility 0.3s ease;
+        z-index: 10;
+    }
+    .chat-message.copied .copy-tooltip {
+        opacity: 1;
+        visibility: visible;
+    }
+
+    /* Tabs */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 0; /* Remove gap between tabs */
+        border-bottom: 2px solid #e0e0e0; /* Subtle tab line */
+    }
+    .stTabs [data-baseweb="tab"] {
+        padding: 0.75rem 1.5rem;
+        border-radius: 8px 8px 0 0;
+        background-color: #f8f8f8; /* Light background for inactive tabs */
+        color: #777;
+        font-weight: 500;
+        transition: all 0.3s ease;
+        margin-right: 0.25rem; /* Small space between tabs */
+        border: 1px solid #e0e0e0;
+        border-bottom: none;
+    }
+    .stTabs [data-baseweb="tab"][aria-selected="true"] {
+        background-color: white;
+        color: #3498db; /* Active tab color */
+        border-top: 2px solid #3498db; /* Blue top border for active tab */
+        border-left: 1px solid #e0e0e0;
+        border-right: 1px solid #e0e0e0;
+        border-bottom: none;
+        box-shadow: 0 -4px 10px rgba(0,0,0,0.05);
+        z-index: 1; /* Bring active tab to front */
+    }
+    .stTabs [data-baseweb="tab"]:hover {
+        background-color: #f0f2f6;
+        color: #555;
+    }
+    .stTabs [data-baseweb="tab-panel"] {
+        background-color: white; /* Content panel background */
+        padding: 1.5rem;
+        border-radius: 0 0 12px 12px; /* Rounded bottom corners */
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+        border: 1px solid #e0e0e0;
+        border-top: none;
+    }
+
+    /* Metrics */
+    [data-testid="stMetricValue"] {
+        font-weight: 700;
+        color: #34495e; /* Darker text for values */
+        font-size: 1.8rem;
+    }
+    [data-testid="stMetricLabel"] {
+        color: #7f8c8d;
+        font-size: 0.9rem;
+    }
+    .stAlert {
+        border-radius: 8px;
+    }
+
+    /* About Us Section */
     .about-us-header {
         cursor: pointer;
-        padding: 0.5rem;
-        border-radius: 4px;
-        margin-top: 1rem;
+        padding: 0.75rem 1rem;
+        border-radius: 8px;
+        margin-top: 1.5rem;
         font-weight: 500;
+        background-color: #ecf0f1; /* Light gray for header */
+        color: #34495e;
+        transition: background-color 0.2s ease;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+    }
+    .about-us-header:hover {
+        background-color: #dde1e2;
     }
     .about-us-content {
-        padding: 0.8rem;
-        border-radius: 4px;
+        background-color: #fdfefe; /* Very light background */
+        padding: 1rem;
+        border-radius: 8px;
         margin-top: 0.5rem;
         font-size: 0.9rem;
+        color: #555;
+        border: 1px solid #e0e0e0;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.03);
     }
-    
-    /* Main content styles */
-    .main .block-container { padding-top: 1rem; padding-bottom: 1rem; }
-    h1 { font-weight: 600; font-size: 1.8rem; }
-    h2 { font-weight: 600; font-size: 1.5rem; }
-    h3, h4 { font-weight: 500; }
-    .stButton > button { border-radius: 4px; font-weight: 500; transition: all 0.3s; padding: 0.5rem 1rem; }
-    .stButton > button:hover { opacity: 0.8; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
-    .css-1d391kg, .css-12oz5g7 { padding: 1rem; } 
-    .card-container { border-radius: 8px; padding: 1.2rem; margin-bottom: 1rem; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
-    .chat-message { padding: 1rem; border-radius: 8px; margin-bottom: 0.5rem; position: relative; }
-    .user-message { border-left: 4px solid #1E88E5; background-color: #e3f2fd; }
-    .ai-message { border-left: 4px solid #78909C; background-color: #f5f5f5; }
-    .chat-message:active { opacity: 0.7; }
-    .copy-tooltip { position: absolute; top: 0.5rem; right: 0.5rem; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.8rem; display: none; background-color: #555; color: white; z-index: 10; }
-    .chat-message:active .copy-tooltip { display: block; }
-    .stTabs [data-baseweb="tab-list"] { gap: 2px; }
-    .stTabs [data-baseweb="tab"] { padding: 0.5rem 1rem; border-radius: 4px 4px 0 0; }
-    [data-testid="stMetricValue"] { font-weight: 600; }
-    .app-intro { padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem; border-left: 4px solid #1E88E5; background-color: #e3f2fd; }
-    
-    /* User Info Display */
-    .user-info-container {
-        display: flex;
-        align-items: center;
-        padding: 0.5rem;
-        margin-bottom: 1rem;
-        background-color: #f9f9f9;
-        border-radius: 4px;
-    }
-    .user-info-container img {
-        border-radius: 50%;
-        width: 30px;
-        height: 30px;
-        margin-right: 0.8rem;
-    }
-    .user-info-container span {
-        font-size: 0.9rem;
-        color: #333;
+    .about-us-content p {
+        margin-bottom: 0.5rem;
     }
     </style>
     """
@@ -626,165 +316,117 @@ def get_custom_javascript():
             // Copy functionality for chat messages
             const chatMessages = document.querySelectorAll('.chat-message');
             chatMessages.forEach(function(message) {
-                // Add tooltip element dynamically if not present
+                // Ensure tooltip exists
                 if (!message.querySelector('.copy-tooltip')) {
                     const tooltip = document.createElement('span');
                     tooltip.className = 'copy-tooltip';
                     tooltip.textContent = 'Copied!';
                     message.appendChild(tooltip);
                 }
-                
-                let longPressTimer;
-                // Touch events for mobile long press
-                message.addEventListener('touchstart', function(e) {
-                    longPressTimer = setTimeout(() => {
-                        const textToCopy = this.innerText.replace('Copied!', '').trim();
-                        copyToClipboard(textToCopy);
-                        const tooltip = this.querySelector('.copy-tooltip');
-                        if (tooltip) {
-                            tooltip.style.display = 'block';
-                            setTimeout(() => { tooltip.style.display = 'none'; }, 1500);
-                        }
-                    }, 500); // 500ms threshold
+
+                message.addEventListener('click', function(e) {
+                    const textToCopy = this.innerText.replace('Copied!', '').trim(); // Exclude tooltip text
+                    copyToClipboard(textToCopy);
+                    this.classList.add('copied');
+                    const tooltip = this.querySelector('.copy-tooltip');
+                    if (tooltip) {
+                        tooltip.style.opacity = '1';
+                        tooltip.style.visibility = 'visible';
+                        setTimeout(() => { 
+                            this.classList.remove('copied');
+                            tooltip.style.opacity = '0';
+                            tooltip.style.visibility = 'hidden';
+                        }, 1500);
+                    }
                 });
-                message.addEventListener('touchend', function() { clearTimeout(longPressTimer); });
-                message.addEventListener('touchmove', function() { clearTimeout(longPressTimer); });
-                
-                // Click event for desktop
-                 message.addEventListener('click', function(e) {
-                     const textToCopy = this.innerText.replace('Copied!', '').trim();
-                     copyToClipboard(textToCopy);
-                     const tooltip = this.querySelector('.copy-tooltip');
-                     if (tooltip) {
-                         tooltip.style.display = 'block';
-                         setTimeout(() => { tooltip.style.display = 'none'; }, 1500);
-                     }
-                 });
             });
             
             // Collapsible About Us section
             const aboutUsHeader = document.querySelector('.about-us-header');
             const aboutUsContent = document.querySelector('.about-us-content');
             if (aboutUsHeader && aboutUsContent) {
-                // Initialize state if not already done
+                // Initialize state (collapsed by default)
                 if (!aboutUsContent.classList.contains('initialized')) {
-                     aboutUsContent.style.display = 'none'; // Start collapsed
+                     aboutUsContent.style.display = 'none';
                      aboutUsContent.classList.add('initialized');
                 }
-                // Toggle visibility on header click
                 aboutUsHeader.addEventListener('click', function() {
                     aboutUsContent.style.display = (aboutUsContent.style.display === 'none') ? 'block' : 'none';
                 });
             }
-        }, 1000); // Delay helps ensure elements exist
+        }, 1000); // Delay helps ensure Streamlit elements are fully rendered
     });
     </script>
     """
 
-def apply_custom_css():
-    """Injects custom CSS into the Streamlit app."""
-    css = get_custom_css()
-    st.markdown(css, unsafe_allow_html=True)
+def apply_custom_styles_and_scripts():
+    """Injects custom CSS and JavaScript into the Streamlit app."""
+    # Using components.html for full control over head and body injection
+    # This ensures styles and scripts are loaded correctly and persist.
+    components.html(f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+            {get_custom_css()}
+        </head>
+        <body>
+            {get_custom_javascript()}
+        </body>
+        </html>
+    """, height=0, width=0) # height and width 0 means it's not visible
 
-def add_javascript_functionality():
-    """Injects custom JavaScript into the Streamlit app."""
-    js = get_custom_javascript()
-    st.markdown(js, unsafe_allow_html=True)
+# Call this once at the very beginning of the script
+apply_custom_styles_and_scripts()
 
-# --- Page Configuration --- 
-st.set_page_config(page_title="DeepHydro AI Forecasting", layout="wide")
-# Apply CSS and JS early in the script execution
-apply_custom_css()
-# Note: JS might need to be added later if it depends on elements rendered after this point.
-# However, the current JS uses DOMContentLoaded and setTimeout, so placing it here is acceptable.
-# If issues arise, move add_javascript_functionality() to the end of the script.
-add_javascript_functionality() 
-
-# --- Capture User Agent --- 
-def capture_user_agent():
-    """Capture and store the user agent in session state using components.html."""
-    if 'user_agent' not in st.session_state:
-        try:
-            # Removed the 'key' argument as it's not supported by components.html
-            component_value = components.html(
-                """
-                <script>
-                // Send the user agent back to Streamlit via postMessage
-                window.parent.postMessage({
-                    isStreamlitMessage: true,
-                    type: "streamlit:setComponentValue",
-                    key: "user_agent_capture_component", /* Key used by Streamlit to retrieve value */
-                    value: navigator.userAgent
-                }}, "*");
-                </script>
-                """,
-                height=0
-            )
-            # Check if the value was set in session state by the postMessage callback
-            if 'user_agent_capture_component' in st.session_state and st.session_state.user_agent_capture_component:
-                 st.session_state.user_agent = st.session_state.user_agent_capture_component
-            # Fallback if postMessage hasn't updated session state yet
-            elif component_value: 
-                 st.session_state.user_agent = component_value
-            else:
-                 st.session_state.user_agent = "Unknown (Capture Pending)"
-        except Exception as e:
-            st.session_state.user_agent = "Unknown (Capture Failed)"
-
-# --- Initialize Firebase and User Profile --- 
-firebase_initialized = initialize_firebase()
-capture_user_agent() # Attempt to capture user agent
-
-# Initialize user profile
-if 'user_profile' not in st.session_state:
-    if firebase_initialized:
-        user_id = get_persistent_user_id()
-        st.session_state.user_profile, _ = get_or_create_user_profile(user_id)
-    else:
-        st.session_state.user_profile = None
-
-# --- Gemini API Configuration --- 
+# --- Gemini API Configuration ---
 GEMINI_API_KEY = os.getenv("GOOGLE_API_KEY")
 gemini_configured = False
-if GEMINI_API_KEY and GEMINI_API_KEY != "Gemini_api_key":
+if GEMINI_API_KEY and GEMINI_API_KEY != "YOUR_GEMINI_API_KEY_HERE": # Check for placeholder
     try:
         genai.configure(api_key=GEMINI_API_KEY)
         generation_config = genai.types.GenerationConfig(temperature=0.7, top_p=0.95, top_k=40, max_output_tokens=4000)
-        gemini_model_report = genai.GenerativeModel(model_name="gemini-2.5-flash-preview-04-17", generation_config=generation_config)
-        gemini_model_chat = genai.GenerativeModel(model_name="gemini-2.5-flash-preview-04-17", generation_config=generation_config)
+        # Use more descriptive model names if available in future Gemini versions
+        gemini_model_report = genai.GenerativeModel(model_name="gemini-1.5-flash", generation_config=generation_config)
+        gemini_model_chat = genai.GenerativeModel(model_name="gemini-1.5-flash", generation_config=generation_config)
         gemini_configured = True
     except Exception as e:
-        st.error(f"Error configuring Gemini API: {e}. AI features might be limited.")
+        st.error(f"Error configuring Gemini API: {e}. AI features will be disabled.")
 else:
-    st.warning("Gemini API Key not found or is placeholder. AI features will be disabled. Set GOOGLE_API_KEY environment variable.")
+    st.warning("Gemini API Key not found or is placeholder. AI features will be disabled. "
+               "Please set the 'GOOGLE_API_KEY' environment variable.")
 
-# --- Model Paths & Constants --- 
-STANDARD_MODEL_PATH = "standard_model.h5"
-STANDARD_MODEL_SEQUENCE_LENGTH = 60
-if os.path.exists(STANDARD_MODEL_PATH):
-    try:
-        _std_model_temp = tf.keras.models.load_model(STANDARD_MODEL_PATH, compile=False)
-        STANDARD_MODEL_SEQUENCE_LENGTH = _std_model_temp.input_shape[1]
-        del _std_model_temp
-    except Exception as e:
-        st.warning(f"Could not load standard model from {STANDARD_MODEL_PATH}: {e}. Using default {STANDARD_MODEL_SEQUENCE_LENGTH}.")
-else:
-    st.warning(f"Standard model file not found: {STANDARD_MODEL_PATH}.")
-
-# --- Helper Functions (Data, Model, Prediction) --- 
-@st.cache_data
+# --- Helper Functions (Data, Model, Prediction) ---
+@st.cache_data(show_spinner="Loading and Cleaning Data...")
 def load_and_clean_data(uploaded_file_content):
+    """
+    Loads data from an Excel file, cleans it, and infers date and level columns.
+    Uses st.cache_data for performance optimization.
+    """
     try:
         df = pd.read_excel(io.BytesIO(uploaded_file_content), engine="openpyxl")
-        if df.shape[1] < 2: st.error("File must have at least Date and Level columns."); return None
+        if df.shape[1] < 2:
+            st.error("Uploaded file must have at least two columns: one for Date/Time and one for Level/Value.")
+            return None
         
-        date_col = next((col for col in df.columns if any(kw in str(col).lower() for kw in ["date", "time"]) and pd.api.types.is_datetime64_any_dtype(df[col])), 
-                        next((col for col in df.columns if any(kw in str(col).lower() for kw in ["date", "time"]) ), None))
-        level_col = next((col for col in df.columns if any(kw in str(col).lower() for kw in ["level", "groundwater", "gwl", "value"]) and pd.api.types.is_numeric_dtype(df[col])), 
-                         next((col for col in df.columns if any(kw in str(col).lower() for kw in ["level", "groundwater", "gwl", "value"]) ), None))
+        # Robust column identification
+        date_keywords = ["date", "time", "timestamp", "datetime"]
+        level_keywords = ["level", "groundwater", "gwl", "value", "measurement"]
+
+        date_col = next((col for col in df.columns if any(kw in str(col).lower() for kw in date_keywords) and pd.api.types.is_datetime64_any_dtype(df[col])), 
+                        next((col for col in df.columns if any(kw in str(col).lower() for kw in date_keywords)), None))
         
-        if not date_col: st.error("Cannot find Date/Time column."); return None
-        if not level_col: st.error("Cannot find Level/Value column."); return None
+        level_col = next((col for col in df.columns if any(kw in str(col).lower() for kw in level_keywords) and pd.api.types.is_numeric_dtype(df[col])), 
+                         next((col for col in df.columns if any(kw in str(col).lower() for kw in level_keywords)), None))
+        
+        if not date_col:
+            st.error("Could not find a suitable 'Date' or 'Time' column. Please ensure one exists and is recognizable.")
+            return None
+        if not level_col:
+            st.error("Could not find a suitable 'Level' or 'Value' column. Please ensure one exists and is numeric.")
+            return None
         
         st.success(f"Identified columns: Date='{date_col}', Level='{level_col}'.")
         df = df.rename(columns={date_col: "Date", level_col: "Level"})[["Date", "Level"]]
@@ -794,714 +436,1112 @@ def load_and_clean_data(uploaded_file_content):
         
         initial_rows = len(df)
         df.dropna(subset=["Date", "Level"], inplace=True)
-        if len(df) < initial_rows: st.warning(f"Dropped {initial_rows - len(df)} rows with invalid data.")
-        if df.empty: st.error("No valid data remaining."); return None
+        if len(df) < initial_rows:
+            st.warning(f"Dropped {initial_rows - len(df)} rows with invalid Date or Level data.")
+        if df.empty:
+            st.error("No valid data remaining after cleaning. Please check your file.")
+            return None
         
         df = df.sort_values(by="Date").reset_index(drop=True)
         if df.duplicated(subset=["Date"]).any():
             duplicates_count = df.duplicated(subset=["Date"]).sum()
-            st.warning(f"Found {duplicates_count} duplicate dates. Keeping first occurrence.")
+            st.warning(f"Found {duplicates_count} duplicate dates. Keeping the first occurrence for each date.")
             df = df.drop_duplicates(subset=["Date"], keep="first")
             
         if df["Level"].isnull().any():
             missing_before = df["Level"].isnull().sum()
             df["Level"] = df["Level"].interpolate(method="linear", limit_direction="both")
-            st.warning(f"Filled {missing_before} missing level values using interpolation.")
-        if df["Level"].isnull().any(): st.error("Could not fill all missing values."); return None
+            if df["Level"].isnull().any():
+                st.error("Could not fill all missing level values using interpolation. Data may be too sparse.")
+                return None
+            else:
+                st.info(f"Filled {missing_before} missing level values using linear interpolation.")
         
-        st.success("Data loaded and cleaned!")
+        st.success("Data loaded and cleaned successfully!")
         return df
-    except Exception as e: st.error(f"Error loading/cleaning data: {e}"); return None
+    except Exception as e:
+        st.error(f"Error loading or cleaning data: {e}. Please ensure it's a valid XLSX file.")
+        return None
 
 def create_sequences(data, sequence_length):
+    """Creates input-output sequences for the deep learning model."""
     X, y = [], []
     for i in range(len(data) - sequence_length):
         X.append(data[i:(i + sequence_length)])
         y.append(data[i + sequence_length])
     return np.array(X), np.array(y)
 
-@st.cache_resource
-def load_keras_model_from_file(uploaded_file_obj, model_name_for_log):
-    temp_model_path = f"temp_{model_name_for_log.replace(' ', '_')}.h5"
+@st.cache_resource(show_spinner="Loading Keras Model...")
+def load_keras_model_from_file(uploaded_file_obj, model_name_for_log="Custom Model"):
+    """
+    Loads a Keras model from an uploaded .h5 file.
+    Uses st.cache_resource to avoid re-loading the model repeatedly.
+    """
+    temp_model_path = f"temp_{uuid.uuid4()}.h5" # Use unique temp name
     try:
-        with open(temp_model_path, "wb") as f: f.write(uploaded_file_obj.getbuffer())
+        with open(temp_model_path, "wb") as f:
+            f.write(uploaded_file_obj.getbuffer())
         model = tf.keras.models.load_model(temp_model_path, compile=False)
         sequence_length = model.input_shape[1]
-        st.success(f"Loaded {model_name_for_log}. Sequence length: {sequence_length}")
+        st.success(f"Loaded '{model_name_for_log}' successfully. Input sequence length: {sequence_length}")
         return model, sequence_length
-    except Exception as e: st.error(f"Error loading Keras model {model_name_for_log}: {e}"); return None, None
-    finally: 
-        if os.path.exists(temp_model_path): os.remove(temp_model_path)
+    except Exception as e:
+        st.error(f"Error loading Keras model '{model_name_for_log}': {e}. Ensure it's a valid .h5 TensorFlow Keras model.")
+        return None, None
+    finally:
+        if os.path.exists(temp_model_path):
+            os.remove(temp_model_path)
 
-@st.cache_resource
+@st.cache_resource(show_spinner="Loading Standard Pre-trained Model...")
 def load_standard_model_cached(path):
+    """
+    Loads the standard pre-trained Keras model.
+    Uses st.cache_resource for performance.
+    """
     try:
         model = tf.keras.models.load_model(path, compile=False)
         sequence_length = model.input_shape[1]
+        st.success(f"Standard model loaded (Sequence Length: {sequence_length}).")
         return model, sequence_length
-    except Exception as e: st.error(f"Error loading standard Keras model from {path}: {e}"); return None, None
+    except Exception as e:
+        st.error(f"Error loading standard Keras model from {path}: {e}. "
+                 "Please ensure 'standard_model.h5' is in the same directory as app.py.")
+        return None, None
 
-def build_lstm_model(sequence_length, n_features=1):
+def build_deep_learning_model(sequence_length, n_features=1):
+    """Builds a simple Deep Learning (LSTM) model architecture."""
     model = Sequential([
-        LSTM(40, activation="relu", input_shape=(sequence_length, n_features)), 
-        Dropout(0.5), 
-        Dense(1)
+        LSTM(units=50, activation="relu", input_shape=(sequence_length, n_features), return_sequences=False),
+        Dropout(0.3), # Reduced dropout for potentially better training stability
+        Dense(units=1)
     ])
     model.compile(optimizer="adam", loss="mean_squared_error")
     return model
 
 def predict_with_dropout_uncertainty(model, last_sequence_scaled, n_steps, n_iterations, scaler, model_sequence_length):
-    all_predictions = []
-    current_sequence = last_sequence_scaled.copy().reshape(1, model_sequence_length, 1)
+    """
+    Performs multi-step forecasting with Monte Carlo Dropout for uncertainty estimation.
+    Applies a minimum uncertainty percentage to prevent overly narrow CIs.
+    """
+    all_predictions_scaled = []
     
+    # Use tf.function for faster graph execution
     @tf.function
     def predict_step_training_true(inp):
-        return model(inp, training=True)
-        
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    status_text.text(f"Running MC Dropout (0/{n_iterations})...")
+        return model(inp, training=True) # Important: inference in training mode for dropout
+
+    progress_bar = st.progress(0, text=f"Running Monte Carlo Dropout (0/{n_iterations} iterations)...")
     
     for i in range(n_iterations):
         iteration_predictions_scaled = []
-        temp_sequence = current_sequence.copy()
-        for _ in range(n_steps):
-            next_pred_scaled = predict_step_training_true(temp_sequence).numpy()[0,0]
-            iteration_predictions_scaled.append(next_pred_scaled)
-            new_step = np.array([[next_pred_scaled]]).reshape(1, 1, 1)
-            temp_sequence = np.append(temp_sequence[:, 1:, :], new_step, axis=1)
-            
-        all_predictions.append(iteration_predictions_scaled)
-        progress_percentage = (i + 1) / n_iterations
-        progress_bar.progress(progress_percentage)
-        status_text.text(f"Running MC Dropout ({i+1}/{n_iterations})...")
+        # Clone sequence for each iteration to avoid contamination
+        temp_sequence = last_sequence_scaled.copy().reshape(1, model_sequence_length, 1) 
         
-    progress_bar.empty(); status_text.empty()
-    
-    predictions_array_scaled = np.array(all_predictions)
+        for _ in range(n_steps):
+            # Predict next step
+            next_pred_scaled = predict_step_training_true(temp_sequence).numpy()[0, 0]
+            iteration_predictions_scaled.append(next_pred_scaled)
+            
+            # Update sequence for next prediction
+            new_step = np.array([[next_pred_scaled]]).reshape(1, 1, 1)
+            temp_sequence = np.append(temp_sequence[:, 1:, :], new_step, axis=1) # Shift window
+            
+        all_predictions_scaled.append(iteration_predictions_scaled)
+        progress_bar.progress((i + 1) / n_iterations, text=f"Running Monte Carlo Dropout ({i+1}/{n_iterations} iterations)...")
+        
+    progress_bar.empty() # Clear progress bar once done
+
+    predictions_array_scaled = np.array(all_predictions_scaled) # Shape: (n_iterations, n_steps)
     mean_preds_scaled = np.mean(predictions_array_scaled, axis=0)
     std_devs_scaled = np.std(predictions_array_scaled, axis=0)
     
+    # Inverse transform mean predictions
     mean_preds = scaler.inverse_transform(mean_preds_scaled.reshape(-1, 1)).flatten()
     
+    # Calculate confidence intervals (95% CI -> 1.96 standard deviations)
     ci_multiplier = 1.96
     lower_bound_scaled = mean_preds_scaled - ci_multiplier * std_devs_scaled
     upper_bound_scaled = mean_preds_scaled + ci_multiplier * std_devs_scaled
+    
+    # Inverse transform confidence intervals
     lower_bound = scaler.inverse_transform(lower_bound_scaled.reshape(-1, 1)).flatten()
     upper_bound = scaler.inverse_transform(upper_bound_scaled.reshape(-1, 1)).flatten()
     
-    min_uncertainty_percent = 0.05 
+    # Apply minimum uncertainty percentage to avoid very narrow CIs, especially for stable forecasts
+    min_uncertainty_percent = 0.02 # Adjusted to 2%
     for i in range(len(mean_preds)):
-        if mean_preds[i] != 0:
+        if abs(mean_preds[i]) > 1e-6: # Avoid division by zero if mean_preds is near zero
             min_uncertainty_value = abs(mean_preds[i] * min_uncertainty_percent / 2.0)
             current_half_range = (upper_bound[i] - lower_bound[i]) / 2.0
             if current_half_range < min_uncertainty_value:
                 lower_bound[i] = mean_preds[i] - min_uncertainty_value
                 upper_bound[i] = mean_preds[i] + min_uncertainty_value
         else:
-             abs_uncertainty = 0.01
-             lower_bound[i] = -abs_uncertainty
-             upper_bound[i] = abs_uncertainty
+            # For predictions very close to zero, apply a fixed small absolute uncertainty
+            abs_uncertainty = 0.01 
+            lower_bound[i] = mean_preds[i] - abs_uncertainty
+            upper_bound[i] = mean_preds[i] + abs_uncertainty
              
     return mean_preds, lower_bound, upper_bound
 
 def calculate_metrics(y_true, y_pred):
+    """Calculates RMSE, MAE, and MAPE between true and predicted values."""
     if not isinstance(y_true, np.ndarray): y_true = np.array(y_true)
     if not isinstance(y_pred, np.ndarray): y_pred = np.array(y_pred)
-    if len(y_true) == 0 or len(y_pred) == 0 or len(y_true) != len(y_pred):
+    
+    # Handle NaN values
+    mask = np.isfinite(y_true) & np.isfinite(y_pred)
+    if not np.any(mask):
         return {"RMSE": np.nan, "MAE": np.nan, "MAPE": np.nan}
     
-    mask = np.isfinite(y_true) & np.isfinite(y_pred)
-    if not np.any(mask): return {"RMSE": np.nan, "MAE": np.nan, "MAPE": np.nan}
     y_true_clean, y_pred_clean = y_true[mask], y_pred[mask]
-    if len(y_true_clean) == 0: return {"RMSE": np.nan, "MAE": np.nan, "MAPE": np.nan}
+    
+    if len(y_true_clean) == 0:
+        return {"RMSE": np.nan, "MAE": np.nan, "MAPE": np.nan}
     
     rmse = np.sqrt(mean_squared_error(y_true_clean, y_pred_clean))
     mae = mean_absolute_error(y_true_clean, y_pred_clean)
     
+    # Calculate MAPE, handling zero true values
     mape_mask = (y_true_clean != 0)
-    mape = mean_absolute_percentage_error(y_true_clean[mape_mask], y_pred_clean[mape_mask]) * 100 if np.any(mape_mask) else np.nan
+    mape = np.nan
+    if np.any(mape_mask):
+        mape = np.mean(np.abs((y_true_clean[mape_mask] - y_pred_clean[mape_mask]) / y_true_clean[mape_mask])) * 100
         
     return {"RMSE": rmse, "MAE": mae, "MAPE": mape}
 
-# --- Plotting Functions --- 
+# --- Plotting Functions ---
 def create_forecast_plot(historical_df, forecast_df):
+    """Generates an interactive Plotly graph of historical data and forecast with CIs."""
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=historical_df["Date"], y=historical_df["Level"], mode="lines", name="Historical Data", line=dict(color="rgb(31, 119, 180)")))
-    fig.add_trace(go.Scatter(x=forecast_df["Date"], y=forecast_df["Forecast"], mode="lines", name="Forecast", line=dict(color="rgb(255, 127, 14)")))
-    fig.add_trace(go.Scatter(x=forecast_df["Date"], y=forecast_df["Upper_CI"], mode="lines", name="Upper CI (95%)", line=dict(width=0), showlegend=False))
-    fig.add_trace(go.Scatter(x=forecast_df["Date"], y=forecast_df["Lower_CI"], mode="lines", name="Lower CI (95%)", line=dict(width=0), fillcolor="rgba(255, 127, 14, 0.2)", fill="tonexty", showlegend=True))
-    fig.update_layout(title="Groundwater Level: Historical Data & AI Forecast", xaxis_title="Date", yaxis_title="Groundwater Level", hovermode="x unified", legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01), template="plotly_white")
+    fig.add_trace(go.Scatter(x=historical_df["Date"], y=historical_df["Level"], mode="lines", name="Historical Data", 
+                             line=dict(color="#3498db", width=2))) # Primary blue
+    fig.add_trace(go.Scatter(x=forecast_df["Date"], y=forecast_df["Forecast"], mode="lines", name="AI Forecast", 
+                             line=dict(color="#e67e22", width=2, dash='dash'))) # Orange for forecast
+    
+    # Add confidence interval shading
+    fig.add_trace(go.Scatter(x=forecast_df["Date"], y=forecast_df["Upper_CI"], mode="lines", name="Upper CI (95%)", 
+                             line=dict(width=0), showlegend=False))
+    fig.add_trace(go.Scatter(x=forecast_df["Date"], y=forecast_df["Lower_CI"], mode="lines", name="Lower CI (95%)", 
+                             line=dict(width=0), fillcolor="rgba(230, 126, 34, 0.2)", fill="tonexty", showlegend=True))
+    
+    fig.update_layout(
+        title="<b>Groundwater Level: Historical Data & AI Forecast</b>",
+        xaxis_title="Date",
+        yaxis_title="Groundwater Level",
+        hovermode="x unified",
+        legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01, bgcolor="rgba(255,255,255,0.7)"),
+        template="plotly_white",
+        font=dict(family="Inter", size=12),
+        title_font_size=18,
+        margin=dict(l=40, r=40, t=60, b=40),
+        height=500
+    )
     return fig
 
 def create_loss_plot(history_dict):
+    """Generates an interactive Plotly graph of training and validation loss."""
     if not history_dict or not isinstance(history_dict, dict) or "loss" not in history_dict or "val_loss" not in history_dict:
-        fig = go.Figure().update_layout(title="No Training History Available", xaxis_title="Epoch", yaxis_title="Loss")
-        fig.add_annotation(text="Training history unavailable.",xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
+        fig = go.Figure().update_layout(
+            title="<b>Model Training & Validation Loss</b>",
+            xaxis_title="Epoch",
+            yaxis_title="Loss",
+            template="plotly_white",
+            height=400,
+            annotations=[dict(text="Training history unavailable.", xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False, font=dict(size=16, color="gray"))]
+        )
         return fig
-    history_df = pd.DataFrame(history_dict); history_df["Epoch"] = history_df.index + 1
+
+    history_df = pd.DataFrame(history_dict)
+    history_df["Epoch"] = history_df.index + 1
+    
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=history_df["Epoch"], y=history_df["loss"], mode="lines", name="Training Loss"))
-    fig.add_trace(go.Scatter(x=history_df["Epoch"], y=history_df["val_loss"], mode="lines", name="Validation Loss"))
-    fig.update_layout(title="Model Training & Validation Loss", xaxis_title="Epoch", yaxis_title="Loss (MSE)", hovermode="x unified", template="plotly_white")
+    fig.add_trace(go.Scatter(x=history_df["Epoch"], y=history_df["loss"], mode="lines", name="Training Loss", line=dict(color="#27ae60"))) # Green
+    fig.add_trace(go.Scatter(x=history_df["Epoch"], y=history_df["val_loss"], mode="lines", name="Validation Loss", line=dict(color="#e74c3c"))) # Red
+    
+    fig.update_layout(
+        title="<b>Model Training & Validation Loss</b>",
+        xaxis_title="Epoch",
+        yaxis_title="Loss (Mean Squared Error)",
+        hovermode="x unified",
+        legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01, bgcolor="rgba(255,255,255,0.7)"),
+        template="plotly_white",
+        font=dict(family="Inter", size=12),
+        title_font_size=18,
+        margin=dict(l=40, r=40, t=60, b=40),
+        height=400
+    )
     return fig
 
-# --- Gemini API Functions --- 
+def create_generic_data_plot(df, x_col, y_col, color_col, size_col, chart_type):
+    """Generates a dynamic Plotly Express chart for the generic data analyzer."""
+    if not df.empty and x_col and y_col:
+        try:
+            if chart_type == "Line Plot":
+                fig = px.line(df, x=x_col, y=y_col, color=color_col, markers=True, title=f"<b>Line Plot of {y_col} vs {x_col}</b>")
+            elif chart_type == "Scatter Plot":
+                fig = px.scatter(df, x=x_col, y=y_col, color=color_col, size=size_col, hover_data=df.columns, title=f"<b>Scatter Plot of {y_col} vs {x_col}</b>")
+            elif chart_type == "Bar Chart":
+                fig = px.bar(df, x=x_col, y=y_col, color=color_col, title=f"<b>Bar Chart of {y_col} by {x_col}</b>")
+            elif chart_type == "Histogram":
+                fig = px.histogram(df, x=x_col, color=color_col, title=f"<b>Histogram of {x_col}</b>")
+            elif chart_type == "Box Plot":
+                fig = px.box(df, x=x_col, y=y_col, color=color_col, title=f"<b>Box Plot of {y_col} by {x_col}</b>")
+            else:
+                st.warning("Selected chart type not supported.")
+                return go.Figure() # Empty figure
+            
+            fig.update_layout(
+                template="plotly_white",
+                font=dict(family="Inter", size=12),
+                title_font_size=18,
+                margin=dict(l=40, r=40, t=60, b=40),
+                height=500
+            )
+            return fig
+        except Exception as e:
+            st.error(f"Error generating chart: {e}. Check column selections and data types.")
+            return go.Figure() # Return empty figure on error
+    return go.Figure() # Return empty figure if no data or columns selected
+
+# --- Gemini API Functions ---
 def generate_gemini_report(hist_df, forecast_df, metrics, language):
-    if not gemini_configured: return "AI report disabled. Configure Gemini API Key."
-    if hist_df is None or forecast_df is None or metrics is None: return "Error: Insufficient data for AI report."
+    """
+    Generates a scientific report using Gemini API, focusing on hydrogeological insights.
+    Censors specific technical AI terms.
+    """
+    if not gemini_configured: return "AI report disabled. Gemini API Key is not configured."
+    if hist_df is None or forecast_df is None or metrics is None:
+        return "Error: Insufficient data (historical, forecast, or metrics) for AI report generation."
+    
+    prompt = f"""Act as a highly experienced professional hydrologist and data scientist. Provide a concise, clear, and actionable report in {language} based on the provided historical groundwater data, future forecasts, and model performance metrics. Your report should focus on:
+    1.  **Executive Summary:** A brief overview of current conditions and future outlook.
+    2.  **Historical Data Insights:** Analyze trends, seasonality, and anomalies in the historical groundwater levels.
+    3.  **AI Forecast Interpretation:** Explain the predicted future levels, the significance of the confidence intervals (C.I.), and what the uncertainty implies. Discuss potential shifts or continuations of trends.
+    4.  **Recommendations/Implications:** Based on the forecast, suggest practical implications for water resource management, environmental planning, or risk assessment.
+
+    **IMPORTANT:**
+    - Do NOT discuss the internal technical details of the AI model's architecture, training process, or specific deep learning terms (e.g., LSTM, epochs, layers, dropout, optimizers, sequence length). Use general terms like "AI model" or "deep learning approach."
+    - Ensure the language is professional, unbiased, and suitable for a stakeholder presentation.
+
+    ### Historical Data Summary:
+    {hist_df["Level"].describe().to_string()}
+
+    ### AI Forecast Summary:
+    {forecast_df[["Forecast", "Lower_CI", "Upper_CI"]].describe().to_string()}
+
+    ### Model Accuracy Metrics (Validation/Pseudo-Validation):
+    - Root Mean Squared Error (RMSE): {metrics.get('RMSE', 'N/A'):.4f}
+    - Mean Absolute Error (MAE): {metrics.get('MAE', 'N/A'):.4f}
+    - Mean Absolute Percentage Error (MAPE): {metrics.get('MAPE', 'N/A'):.2f}%
+
+    Please generate the report now.
+    """
     try:
-        prompt = f"""Act as a professional hydrologist. Provide a concise report in {language} based on the historical data, forecast, and metrics. Focus on trends, forecast reliability (mentioning C.I.), implications, and recommendations. **IMPORTANT: Do NOT discuss technical model details (architecture, training). Focus on data and outcomes.**
-
-Historical Summary:
-{hist_df["Level"].describe().to_string()}
-
-Forecast Summary:
-{forecast_df[["Forecast", "Lower_CI", "Upper_CI"]].describe().to_string()}
-
-Metrics:
-RMSE: {metrics.get('RMSE', 'N/A'):.4f}
-MAE: {metrics.get('MAE', 'N/A'):.4f}
-MAPE: {metrics.get('MAPE', 'N/A'):.2f}%
-
-Generate the report:"""
         response = gemini_model_report.generate_content(prompt)
-        forbidden_terms = ["lstm", "long short-term memory", "epoch", "layer", "dropout", "adam optimizer", "sequence length"]
+        # Post-process to ensure no forbidden terms accidentally slip through (double check)
+        forbidden_terms = ["lstm", "long short-term memory", "epoch", "layer", "dropout", "adam optimizer", "sequence length", "relu activation"]
         cleaned_text = response.text
-        for term in forbidden_terms: cleaned_text = cleaned_text.replace(term, "[modeling technique]")
+        for term in forbidden_terms:
+            cleaned_text = cleaned_text.replace(term, "[deep learning technique]") # Replaced with a generic term
         return cleaned_text
-    except Exception as e: st.error(f"Error generating AI report: {e}"); return f"Error: {e}"
+    except Exception as e:
+        st.error(f"Error generating AI report: {e}")
+        return f"Error: Could not generate AI report due to a technical issue."
 
 def get_gemini_chat_response(user_query, chat_hist, hist_df, forecast_df, metrics, ai_report):
-    if not gemini_configured: return "AI chat disabled. Configure Gemini API Key."
-    if hist_df is None or forecast_df is None or metrics is None: return "Error: Insufficient context for AI chat."
-    try:
-        context_parts = [
-            "You are a senior AI and hydrogeology expert with over 20 years of experience in groundwater analysis and predictive modeling.",
-            "Your task is to interpret the following groundwater data and forecasts, and provide a professional engineering-style report.",
-            "**IMPORTANT: Do NOT discuss internal AI model mechanics. Focus only on data interpretation, patterns, trends, uncertainties, and implications for groundwater behavior.**",
-            "",
-            "### Historical Groundwater Summary:",
-            hist_df["Level"].describe().to_string(),
-            "",
-            "### Forecast Results Summary:",
-            forecast_df[["Forecast", "Lower_CI", "Upper_CI"]].describe().to_string(),
-            "",
-            f"### Forecast Accuracy Metrics:\nRMSE = {metrics.get('RMSE', 'N/A'):.4f}\nMAE = {metrics.get('MAE', 'N/A'):.4f}\nMAPE = {metrics.get('MAPE', 'N/A'):.2f}%",
-            "",
-            "### Existing AI Report (if available):",
-            ai_report if ai_report else "(No prior AI report available.)",
-            "",
-            "### Instructions:",
-            "- Write in the style of a senior data analyst or hydrogeological engineer's report.",
-            "- Identify trends, anomalies, and seasonal patterns in groundwater level data.",
-            "- Explain the forecast ranges (CI) and what they imply for groundwater conditions.",
-            "- Compare historical and forecast data to infer changes in groundwater behavior.",
-            "- Suggest potential implications for resource management, policy, or risk.",
-            "- Structure the output as: Executive Summary, Data Insights, Forecast Interpretation, Recommendations.",
-            "",
-            "### Previous Conversation (for context):"
-        ]
-        for sender, message in chat_hist[-6:]: context_parts.append(f"{sender}: {message}")
-        context_parts.append(f"User: {user_query}"); context_parts.append("AI:")
-        context = "\n".join(context_parts)
-        
-        response = gemini_model_chat.generate_content(context)
-        forbidden_terms = ["lstm", "long short-term memory", "epoch", "layer", "dropout", "adam optimizer", "sequence length"]
-        cleaned_text = response.text
-        for term in forbidden_terms: cleaned_text = cleaned_text.replace(term, "[modeling technique]")
-        return cleaned_text
-    except Exception as e: st.error(f"Error in AI chat: {e}"); return f"Error: {e}"
-
-# --- Main Forecasting Pipeline --- 
-def run_forecast_pipeline(df, model_choice, forecast_horizon, custom_model_file_obj, 
-                        sequence_length_train_param, epochs_train_param, 
-                        mc_iterations_param, use_custom_scaler_params_flag, custom_scaler_min_param, custom_scaler_max_param):
-    st.info(f"Starting forecast: {model_choice}")
-    model, history_data, scaler_obj = None, None, MinMaxScaler(feature_range=(0, 1))
-    model_sequence_length = sequence_length_train_param
+    """
+    Provides a conversational AI response based on the provided context.
+    Censors specific technical AI terms.
+    """
+    if not gemini_configured: return "AI chat disabled. Gemini API Key is not configured."
+    if hist_df is None or forecast_df is None or metrics is None:
+        return "Error: Insufficient context (historical data, forecast, or metrics) for AI chat."
     
+    # Construct comprehensive context for the AI
+    context_parts = [
+        "You are a highly experienced AI and hydrogeology expert with over 20 years of experience in groundwater analysis and predictive modeling.",
+        "Your role is to interpret the provided groundwater data, forecasts, and reports, and answer user questions in a professional, engineering-style manner.",
+        "**IMPORTANT:** Do NOT discuss internal AI model mechanics, architecture, or specific deep learning terms (e.g., LSTM, epochs, layers). Focus only on data interpretation, patterns, trends, uncertainties, and implications for groundwater behavior.",
+        "Be concise, clear, and actionable.",
+        "",
+        "### Historical Groundwater Data Summary:",
+        hist_df["Level"].describe().to_string(),
+        "",
+        "### AI Forecast Results Summary:",
+        forecast_df[["Forecast", "Lower_CI", "Upper_CI"]].describe().to_string(),
+        "",
+        f"### Forecast Accuracy Metrics:\nRMSE = {metrics.get('RMSE', 'N/A'):.4f}\nMAE = {metrics.get('MAE', 'N/A'):.4f}\nMAPE = {metrics.get('MAPE', 'N/A'):.2f}%",
+        "",
+        "### Previously Generated AI Report (for reference, if available):",
+        ai_report if ai_report else "(No prior AI report has been generated.)",
+        "",
+        "### Current Conversation History (for context):"
+    ]
+    
+    # Add recent chat history for continuity (last 6 turns to manage token limits)
+    for sender, message in chat_hist[-6:]: # Include a few previous turns
+        context_parts.append(f"{sender}: {message}")
+    
+    context_parts.append(f"User: {user_query}")
+    context_parts.append("AI:") # Prompt the AI to generate its response
+
+    context_prompt = "\n".join(context_parts)
+
     try:
-        st.info("Step 1: Preparing Model...")
+        response = gemini_model_chat.generate_content(context_prompt)
+        # Post-process to ensure no forbidden terms accidentally slip through
+        forbidden_terms = ["lstm", "long short-term memory", "epoch", "layer", "dropout", "adam optimizer", "sequence length", "relu activation"]
+        cleaned_text = response.text
+        for term in forbidden_terms:
+            cleaned_text = cleaned_text.replace(term, "[deep learning technique]")
+        return cleaned_text
+    except Exception as e:
+        st.error(f"Error in AI chat: {e}")
+        return f"Error: Could not process your request due to a technical issue."
+
+# --- Main Forecasting Pipeline ---
+def run_forecast_pipeline(df, model_choice, forecast_horizon, custom_model_file_obj, 
+                          sequence_length_train_param, epochs_train_param, 
+                          mc_iterations_param, use_custom_scaler_params_flag, 
+                          custom_scaler_min_param, custom_scaler_max_param):
+    """
+    Executes the entire forecasting pipeline: model loading/training, data scaling,
+    sequence creation, forecasting with uncertainty, and results compilation.
+    """
+    st.info(f"Initiating forecast pipeline using: {model_choice}...")
+    
+    model = None
+    history_data = None
+    scaler_obj = MinMaxScaler(feature_range=(0, 1))
+    model_sequence_length = sequence_length_train_param
+
+    try:
+        # Step 1: Prepare Model (Load or Build)
+        st.subheader("Step 1: Preparing Deep Learning Model")
         if model_choice == "Standard Pre-trained Model":
             if os.path.exists(STANDARD_MODEL_PATH):
                 model, model_sequence_length = load_standard_model_cached(STANDARD_MODEL_PATH)
+                if model is None: return None, None, None, None # Error occurred during loading
+            else:
+                st.error(f"Standard model file not found at: '{STANDARD_MODEL_PATH}'. "
+                         "Please ensure it's in the application directory. Cannot proceed.")
+                return None, None, None, None
+        elif model_choice == "Upload Custom .h5 Model":
+            if custom_model_file_obj:
+                model, model_sequence_length = load_keras_model_from_file(custom_model_file_obj, "Custom Model")
                 if model is None: return None, None, None, None
-            else: st.error(f"Standard model not found: {STANDARD_MODEL_PATH}."); return None, None, None, None
-        elif model_choice == "Upload Custom .h5 Model" and custom_model_file_obj:
-            model, model_sequence_length = load_keras_model_from_file(custom_model_file_obj, "Custom Model")
-            if model is None: return None, None, None, None
-        elif model_choice != "Train New Model":
-            st.error("Invalid model choice or missing file."); return None, None, None, None
+            else:
+                st.warning("No custom .h5 model uploaded. Please upload a model file.")
+                return None, None, None, None
+        elif model_choice == "Train New Model":
+            # Model will be built later
+            st.info(f"New Deep Learning model will be trained with sequence length: {model_sequence_length}, epochs: {epochs_train_param}.")
         
         st.session_state.model_sequence_length = model_sequence_length
-        st.info(f"Model ready. Sequence length: {model_sequence_length}")
 
-        st.info("Step 2: Preprocessing Data (Scaling)...")
+        # Step 2: Preprocess Data (Scaling)
+        st.subheader("Step 2: Scaling Data")
         if use_custom_scaler_params_flag and custom_scaler_min_param is not None and custom_scaler_max_param is not None and custom_scaler_min_param < custom_scaler_max_param:
             scaler_obj.fit(np.array([[custom_scaler_min_param], [custom_scaler_max_param]]))
             scaled_data = scaler_obj.transform(df["Level"].values.reshape(-1, 1))
-            st.info(f"Using custom scaler: min={custom_scaler_min_param}, max={custom_scaler_max_param}")
+            st.info(f"Using custom scaler based on provided min={custom_scaler_min_param:.4f}, max={custom_scaler_max_param:.4f}.")
         else:
             scaled_data = scaler_obj.fit_transform(df["Level"].values.reshape(-1, 1))
-            st.info(f"Using fitted scaler: min={scaler_obj.data_min_[0]:.4f}, max={scaler_obj.data_max_[0]:.4f}")
-        st.info("Scaling complete.")
-
-        st.info(f"Step 3: Creating sequences (length {model_sequence_length})...")
-        if len(df) <= model_sequence_length: st.error(f"Not enough data ({len(df)} rows) for sequence length ({model_sequence_length})."); return None, None, None, None
+            st.info(f"Data scaled using automatic min-max scaling. (Min: {scaler_obj.data_min_[0]:.4f}, Max: {scaler_obj.data_max_[0]:.4f})")
+        
+        # Step 3: Create Sequences
+        st.subheader("Step 3: Generating Input Sequences")
+        if len(df) <= model_sequence_length:
+            st.error(f"Not enough data points ({len(df)}) to create sequences with length {model_sequence_length}. Please use a shorter sequence length or provide more data.")
+            return None, None, None, None
+        
         X, y = create_sequences(scaled_data, model_sequence_length)
-        if len(X) == 0: st.error("Could not create sequences."); return None, None, None, None
-        st.info(f"Sequences created: {len(X)}")
+        if len(X) == 0:
+            st.error("Could not create any input-output sequences from the data. This might be due to insufficient data or incorrect sequence length.")
+            return None, None, None, None
+        st.info(f"Successfully created {len(X)} input sequences for the model.")
 
         evaluation_metrics = {"RMSE": np.nan, "MAE": np.nan, "MAPE": np.nan}
+
+        # Step 4: Model Training or Pseudo-Evaluation
         if model_choice == "Train New Model":
-            st.info(f"Step 4a: Training New Model (Epochs: {epochs_train_param})...")
+            st.subheader("Step 4: Training New Deep Learning Model")
             X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, shuffle=False)
-            if len(X_train) == 0 or len(X_val) == 0: st.error("Not enough data for train/validation split."); return None, None, None, None
             
-            model = build_lstm_model(model_sequence_length)
-            early_stopping = EarlyStopping(monitor="val_loss", patience=10, restore_best_weights=True)
-            train_progress = st.progress(0); status_text_train = st.empty()
-            class ProgressCallback(tf.keras.callbacks.Callback):
+            if len(X_train) == 0 or len(X_val) == 0:
+                st.error("Not enough data to create valid training and validation sets. Reduce test size or provide more data.")
+                return None, None, None, None
+            
+            model = build_deep_learning_model(model_sequence_length)
+            early_stopping = EarlyStopping(monitor="val_loss", patience=15, restore_best_weights=True) # Increased patience
+            
+            # Custom callback for Streamlit progress bar
+            class StreamlitProgressCallback(tf.keras.callbacks.Callback):
+                def __init__(self, total_epochs, progress_bar_placeholder, status_text_placeholder):
+                    super().__init__()
+                    self.total_epochs = total_epochs
+                    self.progress_bar = progress_bar_placeholder
+                    self.status_text = status_text_placeholder
+                    self.epoch_loss = []
+                    self.epoch_val_loss = []
+
                 def on_epoch_end(self, epoch, logs=None):
-                    progress = (epoch + 1) / epochs_train_param
-                    train_progress.progress(progress)
-                    status_text_train.text(f"Training Epoch {epoch+1}/{epochs_train_param} - Loss: {logs['loss']:.4f}, Val Loss: {logs['val_loss']:.4f}")
+                    progress = (epoch + 1) / self.total_epochs
+                    self.progress_bar.progress(progress)
+                    loss = logs.get('loss', 'N/A')
+                    val_loss = logs.get('val_loss', 'N/A')
+                    self.epoch_loss.append(loss)
+                    self.epoch_val_loss.append(val_loss)
+                    self.status_text.text(f"Training Epoch {epoch+1}/{self.total_epochs} - Loss: {loss:.4f}, Val Loss: {val_loss:.4f}")
             
-            history_obj = model.fit(X_train, y_train, epochs=epochs_train_param, batch_size=32, validation_data=(X_val, y_val), callbacks=[early_stopping, ProgressCallback()], verbose=0)
+            progress_bar_placeholder = st.progress(0, text="Training progress...")
+            status_text_placeholder = st.empty()
+
+            history_obj = model.fit(
+                X_train, y_train, 
+                epochs=epochs_train_param, 
+                batch_size=32, 
+                validation_data=(X_val, y_val), 
+                callbacks=[early_stopping, StreamlitProgressCallback(epochs_train_param, progress_bar_placeholder, status_text_placeholder)], 
+                verbose=0 # Suppress verbose output from Keras to keep Streamlit clean
+            )
             history_data = history_obj.history
-            train_progress.empty(); status_text_train.empty()
-            st.success("Training complete.")
+            progress_bar_placeholder.empty()
+            status_text_placeholder.empty()
+            st.success("Deep Learning model training complete.")
             
-            st.info("Evaluating trained model...")
+            st.info("Evaluating newly trained model on validation set...")
             val_predictions_scaled = model.predict(X_val)
             val_predictions = scaler_obj.inverse_transform(val_predictions_scaled)
             y_val_actual = scaler_obj.inverse_transform(y_val)
             evaluation_metrics = calculate_metrics(y_val_actual, val_predictions)
-            st.success("Evaluation complete.")
-        else: # Pre-trained model evaluation
-            st.info("Step 4b: Evaluating Pre-trained Model (Pseudo-Validation)...")
-            if len(X) > 5:
-                val_split_idx = max(1, int(len(X) * 0.8))
+            st.success("Model evaluation complete.")
+        else: # For pre-trained or custom models, perform a pseudo-validation
+            st.subheader("Step 4: Evaluating Model (Pseudo-Validation)")
+            if len(X) > DEFAULT_MODEL_SEQUENCE_LENGTH: # Need enough data for a meaningful split
+                # Use a small portion of the end of the data for pseudo-validation
+                val_split_idx = max(model_sequence_length, int(len(X) * 0.9)) # Use last 10%
                 X_val_pseudo, y_val_pseudo = X[val_split_idx:], y[val_split_idx:]
+                
                 if len(X_val_pseudo) > 0:
+                    st.info(f"Running pseudo-validation on the last {len(X_val_pseudo)} data points.")
                     val_predictions_scaled = model.predict(X_val_pseudo)
                     val_predictions = scaler_obj.inverse_transform(val_predictions_scaled)
                     y_val_actual = scaler_obj.inverse_transform(y_val_pseudo)
                     evaluation_metrics = calculate_metrics(y_val_actual, val_predictions)
                     st.success("Pseudo-evaluation complete.")
-                else: st.warning("Not enough data for pseudo-validation.")
-            else: st.warning("Not enough sequences for pseudo-validation.")
+                else:
+                    st.warning("Not enough sequences available for meaningful pseudo-validation.")
+            else:
+                st.warning(f"Insufficient data ({len(X)} sequences) for pseudo-validation. Skipping evaluation.")
 
-        st.info(f"Step 5: Forecasting {forecast_horizon} Steps (MC Dropout: {mc_iterations_param})...")
+        # Step 5: Generate Forecast
+        st.subheader(f"Step 5: Generating {forecast_horizon}-Step AI Forecast")
+        if model is None:
+            st.error("AI Model not loaded or trained. Cannot proceed with forecasting.")
+            return None, None, None, None
+
         last_sequence_scaled_for_pred = scaled_data[-model_sequence_length:]
         mean_forecast, lower_bound, upper_bound = predict_with_dropout_uncertainty(
             model, last_sequence_scaled_for_pred, forecast_horizon, mc_iterations_param, scaler_obj, model_sequence_length
         )
-        st.success("Forecasting complete.")
+        st.success("AI Forecasting complete with uncertainty quantification.")
 
+        # Step 6: Compile Forecast Results
+        st.subheader("Step 6: Compiling Results")
         last_date = df["Date"].iloc[-1]
-        try: freq = pd.infer_freq(df["Date"].dropna()) or "D"
-        except Exception: freq = "D"
-        try: date_offset = pd.tseries.frequencies.to_offset(freq)
+        
+        # Try to infer frequency for accurate future dates
+        try:
+            freq = pd.infer_freq(df["Date"].dropna())
+            if freq is None: raise ValueError("Could not infer frequency.")
+        except Exception:
+            st.warning("Could not automatically infer data frequency. Defaulting to daily ('D').")
+            freq = "D"
+            
+        try:
+            date_offset = pd.tseries.frequencies.to_offset(freq)
         except ValueError: 
             st.warning(f"Invalid frequency '{freq}'. Defaulting to daily ('D').")
-            date_offset = pd.DateOffset(days=1); freq = 'D'
-            
+            date_offset = pd.DateOffset(days=1); freq = 'D' # Fallback to daily if offset conversion fails
+
         forecast_dates = pd.date_range(start=last_date + date_offset, periods=forecast_horizon, freq=freq)
-        forecast_df = pd.DataFrame({"Date": forecast_dates, "Forecast": mean_forecast, "Lower_CI": lower_bound, "Upper_CI": upper_bound})
+        forecast_df = pd.DataFrame({
+            "Date": forecast_dates, 
+            "Forecast": mean_forecast, 
+            "Lower_CI": lower_bound, 
+            "Upper_CI": upper_bound
+        })
         
-        st.info("Forecast pipeline finished.")
+        st.success("Forecast pipeline completed successfully!")
         return forecast_df, evaluation_metrics, history_data, scaler_obj
 
     except Exception as e:
-        st.error(f"Error in forecast pipeline: {e}")
-        import traceback; st.error(traceback.format_exc())
+        st.error(f"An unexpected error occurred during the forecast pipeline: {e}")
+        import traceback; st.error(traceback.format_exc()) # Show full traceback for debugging
         return None, None, None, None
 
-# --- Initialize Session State --- 
+# --- Initialize Session State ---
 def initialize_session_state():
+    """Initializes all necessary session state variables."""
     defaults = {
-        "cleaned_data": None, "forecast_results": None, "evaluation_metrics": None, 
-        "training_history": None, "ai_report": None, "scaler_object": None, 
-        "forecast_plot_fig": None, "uploaded_data_filename": None,
-        "active_tab": 0, "report_language": "English", "chat_history": [], 
-        "chat_active": False, "model_sequence_length": STANDARD_MODEL_SEQUENCE_LENGTH, 
-        "run_forecast_triggered": False, "about_us_expanded": False,
-        "persistent_user_id": None, "user_profile": None, 
-        "google_auth_status": False, "google_user_info": None,
-        "google_auth_callback": None, "admin_authenticated": False, 
-        "session_visit_logged": False, "user_agent": None
+        "cleaned_data": None,
+        "forecast_results": None,
+        "evaluation_metrics": None,
+        "training_history": None,
+        "ai_report": None,
+        "scaler_object": None,
+        "forecast_plot_fig": None,
+        "uploaded_data_filename": None,
+        "active_tab": "Data Preview", # Start on Data Preview tab
+        "report_language": "English",
+        "chat_history": [],
+        "chat_active": False,
+        "model_sequence_length": DEFAULT_MODEL_SEQUENCE_LENGTH,
+        "run_forecast_triggered": False,
+        "generic_uploaded_data": None, # For new generic data analyzer
+        "session_activity_log": [], # For user-facing session activity
+        "standard_model_loaded_len": DEFAULT_MODEL_SEQUENCE_LENGTH # To store loaded standard model's seq length
     }
     for key, default_value in defaults.items():
-        if key not in st.session_state: st.session_state[key] = default_value
+        if key not in st.session_state:
+            st.session_state[key] = default_value
 
+# Initialize session state on app load
 initialize_session_state()
 
-# --- Sidebar --- 
+# Load standard model's sequence length on startup if available
+# This needs to run once per session, outside of the main flow
+if 'standard_model_loaded_len' not in st.session_state or st.session_state.standard_model_loaded_len == DEFAULT_MODEL_SEQUENCE_LENGTH:
+    if os.path.exists(STANDARD_MODEL_PATH):
+        try:
+            _temp_model = tf.keras.models.load_model(STANDARD_MODEL_PATH, compile=False)
+            st.session_state.standard_model_loaded_len = _temp_model.input_shape[1]
+            del _temp_model # Clean up
+        except Exception:
+            pass # Keep default if loading fails
+
+# --- Session Activity Logging ---
+def log_session_activity(activity_type, details=""):
+    """Logs an activity to the current session's activity log."""
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    st.session_state.session_activity_log.append({
+        "timestamp": timestamp,
+        "activity_type": activity_type,
+        "details": details
+    })
+
+# --- Sidebar Content ---
 with st.sidebar:
     st.title("DeepHydro AI")
-    
-    # User Info / Logout
-    if st.session_state.google_auth_status and st.session_state.google_user_info:
-        user_info = st.session_state.google_user_info
-        st.markdown("---**User**---")
-        st.markdown(f"""<div class="user-info-container">
-            <img src="{user_info.get('picture', '')}" alt="Pic">
-            <span>{user_info.get('email', 'Logged In')}</span>
-        </div>""", unsafe_allow_html=True)
-        if st.button("Logout", key="google_logout_btn", use_container_width=True):
-            st.session_state.google_auth_status = False
-            st.session_state.google_user_info = None
-            st.session_state.persistent_user_id = None
-            st.session_state.user_profile = None
-            st.session_state.google_auth_callback = None
-            if firebase_initialized: log_visitor_activity("Sidebar", "logout")
-            st.success("Logged out."); time.sleep(1); st.rerun()
-        st.markdown("------------")
-    
-    if firebase_initialized: log_visitor_activity("Sidebar", "view")
-    
-    st.header("1. Upload Data")
-    uploaded_data_file = st.file_uploader("Choose XLSX data file", type="xlsx", key="data_uploader")
-    
-    st.header("2. Model & Forecast")
-    model_choice = st.selectbox("Model Type", ("Standard Pre-trained Model", "Train New Model", "Upload Custom .h5 Model"), key="model_select")
-    
-    if firebase_initialized:
-        if 'last_model_choice' not in st.session_state or st.session_state.last_model_choice != model_choice:
-             log_visitor_activity("Sidebar", "select_model", feature_used=model_choice)
-             st.session_state.last_model_choice = model_choice
+    st.markdown("---")
 
+    st.header("1. Data Management")
+    uploaded_data_file = st.file_uploader("Upload Groundwater Data (XLSX)", type="xlsx", key="gw_data_uploader")
+    if uploaded_data_file:
+        if st.session_state.get("uploaded_data_filename") != uploaded_data_file.name:
+            st.session_state.uploaded_data_filename = uploaded_data_file.name
+            with st.spinner("Loading and cleaning groundwater data..."):
+                cleaned_df_result = load_and_clean_data(uploaded_data_file.getvalue())
+            if cleaned_df_result is not None:
+                st.session_state.cleaned_data = cleaned_df_result
+                # Reset previous forecast/report results if new data is loaded
+                st.session_state.forecast_results = None
+                st.session_state.evaluation_metrics = None
+                st.session_state.training_history = None
+                st.session_state.ai_report = None
+                st.session_state.chat_history = []
+                st.session_state.scaler_object = None
+                st.session_state.forecast_plot_fig = None
+                st.session_state.run_forecast_triggered = False
+                st.session_state.active_tab = "Data Preview" # Switch to Data Preview tab
+                log_session_activity("Groundwater Data Upload", f"File: {uploaded_data_file.name}, Rows: {len(cleaned_df_result)}")
+                st.rerun() # Rerun to update main content area
+            else:
+                st.session_state.cleaned_data = None
+                st.error("Data loading failed. Please check your file and try again.")
+                log_session_activity("Groundwater Data Upload Failed", f"File: {uploaded_data_file.name}")
+
+    st.header("2. AI Model & Forecast Settings")
+    model_choice = st.selectbox(
+        "Choose AI Model Type", 
+        ("Standard Pre-trained Model", "Train New Model", "Upload Custom .h5 Model"), 
+        key="model_select"
+    )
+    
     custom_model_file_obj_sidebar = None
     custom_scaler_min_sidebar, custom_scaler_max_sidebar = None, None
     use_custom_scaler_sidebar = False
-    default_sequence_length = st.session_state.get("model_sequence_length", STANDARD_MODEL_SEQUENCE_LENGTH)
-    sequence_length_train_sidebar = default_sequence_length
+
+    # Adjust default sequence length based on loaded standard model if possible
+    current_default_seq_len = st.session_state.get("standard_model_loaded_len", DEFAULT_MODEL_SEQUENCE_LENGTH)
+
+    sequence_length_train_sidebar = st.session_state.get("model_sequence_length", current_default_seq_len)
     epochs_train_sidebar = 50
 
     if model_choice == "Upload Custom .h5 Model":
-        custom_model_file_obj_sidebar = st.file_uploader("Upload .h5 model", type="h5", key="custom_h5_uploader")
-        use_custom_scaler_sidebar = st.checkbox("Provide custom scaler params?", value=False, key="use_custom_scaler_cb")
+        custom_model_file_obj_sidebar = st.file_uploader("Upload your .h5 AI Model", type="h5", key="custom_h5_uploader")
+        use_custom_scaler_sidebar = st.checkbox("Provide custom scaler min/max?", value=False, key="use_custom_scaler_cb")
         if use_custom_scaler_sidebar:
-            st.markdown("Enter **original min/max** values:")
-            custom_scaler_min_sidebar = st.number_input("Original Min", value=0.0, format="%.4f", key="custom_scaler_min_in")
-            custom_scaler_max_sidebar = st.number_input("Original Max", value=1.0, format="%.4f", key="custom_scaler_max_in")
+            st.markdown("Enter **original min/max** values used for training your model:")
+            custom_scaler_min_sidebar = st.number_input("Original Min Value", value=0.0, format="%.4f", key="custom_scaler_min_in")
+            custom_scaler_max_sidebar = st.number_input("Original Max Value", value=1.0, format="%.4f", key="custom_scaler_max_in")
     elif model_choice == "Standard Pre-trained Model":
-        st.info(f"Using standard model (Seq Len: {default_sequence_length})")
-        use_custom_scaler_sidebar = st.checkbox("Provide custom scaler params?", value=False, key="use_std_scaler_cb")
+        st.info(f"Using pre-trained Deep Learning model (Sequence Length: {current_default_seq_len}).")
+        use_custom_scaler_sidebar = st.checkbox("Provide custom scaler min/max?", value=False, key="use_std_scaler_cb")
         if use_custom_scaler_sidebar:
-            st.markdown("Enter **original min/max** values:")
-            custom_scaler_min_sidebar = st.number_input("Original Min", value=0.0, format="%.4f", key="std_scaler_min_in")
-            custom_scaler_max_sidebar = st.number_input("Original Max", value=1.0, format="%.4f", key="std_scaler_max_in")
+            st.markdown("Enter **original min/max** values for scaling:")
+            custom_scaler_min_sidebar = st.number_input("Original Min Value", value=0.0, format="%.4f", key="std_scaler_min_in")
+            custom_scaler_max_sidebar = st.number_input("Original Max Value", value=1.0, format="%.4f", key="std_scaler_max_in")
     elif model_choice == "Train New Model":
+        st.markdown("Configure settings for a new Deep Learning model:")
         try:
-            sequence_length_train_sidebar = st.number_input("Model Sequence Length", min_value=10, max_value=365, value=default_sequence_length, step=10, key="seq_len_train_in")
-        except Exception as e:
-            st.warning(f"Using default sequence length {default_sequence_length}: {e}")
-            sequence_length_train_sidebar = default_sequence_length
-        epochs_train_sidebar = st.number_input("Training Epochs", min_value=10, max_value=500, value=50, step=10, key="epochs_train_in")
-
-    mc_iterations_sidebar = st.number_input("MC Dropout Iterations (C.I.)", min_value=20, max_value=500, value=100, step=10, key="mc_iter_in")
-    forecast_horizon_sidebar = st.number_input("Forecast Horizon (steps)", min_value=1, max_value=100, value=12, step=1, key="horizon_in")
+            sequence_length_train_sidebar = st.number_input("Input Sequence Length", min_value=10, max_value=365, value=current_default_seq_len, step=5, key="seq_len_train_in", help="Number of past data points to consider for each prediction.")
+        except Exception:
+            sequence_length_train_sidebar = current_default_seq_len
+        epochs_train_sidebar = st.number_input("Training Epochs", min_value=10, max_value=500, value=50, step=10, key="epochs_train_in", help="Number of training iterations. More epochs can lead to better learning but also overfitting.")
+    
+    mc_iterations_sidebar = st.number_input("MC Dropout Iterations (for C.I.)", min_value=50, max_value=500, value=100, step=10, key="mc_iter_in", help="Number of Monte Carlo simulations for calculating confidence intervals. Higher values increase accuracy but also computation time.")
+    forecast_horizon_sidebar = st.number_input("Forecast Horizon (Future Steps)", min_value=1, max_value=100, value=12, step=1, key="horizon_in", help="Number of future time steps to forecast.")
 
     # Run Forecast Button
-    run_forecast_button = st.button("Run Forecast", key="run_forecast_main_btn", use_container_width=True)
+    run_forecast_button = st.button("Run AI Forecast", key="run_forecast_main_btn", use_container_width=True)
     if run_forecast_button:
-        access_granted, message = check_feature_access()
-        if access_granted:
-            st.session_state.run_forecast_triggered = True
-            if st.session_state.cleaned_data is not None:
-                if model_choice == "Upload Custom .h5 Model" and not custom_model_file_obj_sidebar:
-                    st.error("Please upload a custom .h5 model file.")
-                    st.session_state.run_forecast_triggered = False
-                else:
-                    if firebase_initialized: log_visitor_activity("Sidebar", "run_forecast", feature_used='Forecast')
-                    with st.spinner(f"Running forecast ({model_choice})..."):
-                        forecast_df, metrics, history, scaler_obj = run_forecast_pipeline(
-                            st.session_state.cleaned_data, model_choice, forecast_horizon_sidebar, 
-                            custom_model_file_obj_sidebar, sequence_length_train_sidebar, epochs_train_sidebar, 
-                            mc_iterations_sidebar, use_custom_scaler_sidebar, custom_scaler_min_sidebar, custom_scaler_max_sidebar
-                        )
-                    st.session_state.forecast_results = forecast_df
-                    st.session_state.evaluation_metrics = metrics
-                    st.session_state.training_history = history
-                    st.session_state.scaler_object = scaler_obj
-                    
-                    if forecast_df is not None and metrics is not None:
-                        st.session_state.forecast_plot_fig = create_forecast_plot(st.session_state.cleaned_data, forecast_df)
-                        st.success("Forecast complete! Results updated.")
-                        st.session_state.ai_report = None; st.session_state.chat_history = []; st.session_state.chat_active = False
-                        st.session_state.active_tab = 1
-                        st.rerun()
-                    else:
-                        st.error("Forecast pipeline failed. Check messages.")
-                        st.session_state.forecast_results = None; st.session_state.evaluation_metrics = None
-                        st.session_state.training_history = None; st.session_state.forecast_plot_fig = None
-            else:
-                st.error("Please upload data first.")
+        if st.session_state.cleaned_data is not None:
+            if model_choice == "Upload Custom .h5 Model" and not custom_model_file_obj_sidebar:
+                st.error("Please upload a custom .h5 model file to proceed with 'Upload Custom .h5 Model' choice.")
                 st.session_state.run_forecast_triggered = False
+            else:
+                st.session_state.run_forecast_triggered = True
+                with st.spinner(f"Running forecast pipeline with {model_choice}... This may take a moment."):
+                    forecast_df, metrics, history, scaler_obj = run_forecast_pipeline(
+                        st.session_state.cleaned_data, model_choice, forecast_horizon_sidebar, 
+                        custom_model_file_obj_sidebar, sequence_length_train_sidebar, epochs_train_sidebar, 
+                        mc_iterations_sidebar, use_custom_scaler_sidebar, custom_scaler_min_sidebar, custom_scaler_max_sidebar
+                    )
+                st.session_state.forecast_results = forecast_df
+                st.session_state.evaluation_metrics = metrics
+                st.session_state.training_history = history
+                st.session_state.scaler_object = scaler_obj
+                
+                if forecast_df is not None and metrics is not None:
+                    st.session_state.forecast_plot_fig = create_forecast_plot(st.session_state.cleaned_data, forecast_df)
+                    st.success("AI Forecast complete! Results are ready for review.")
+                    st.session_state.ai_report = None; # Clear previous report
+                    st.session_state.chat_history = []; st.session_state.chat_active = False # Reset chat
+                    st.session_state.active_tab = "Forecast Results" # Switch to results tab
+                    log_session_activity("AI Forecast Run", f"Model: {model_choice}, Horizon: {forecast_horizon_sidebar}, Metrics: {json.dumps({k: f'{v:.2f}' for k, v in metrics.items() if not np.isnan(v)})}")
+                    st.rerun() # Rerun to update main content area
+                else:
+                    st.error("AI Forecast pipeline failed. Please check the error messages above.")
+                    st.session_state.forecast_results = None; st.session_state.evaluation_metrics = None
+                    st.session_state.training_history = None; st.session_state.forecast_plot_fig = None
+                    log_session_activity("AI Forecast Failed", f"Model: {model_choice}, Error: See logs")
         else:
-            show_google_login_button()
-            if firebase_initialized: log_visitor_activity("Sidebar", "run_forecast_denied", feature_used='Forecast')
+            st.error("Please upload groundwater data first (Step 1) to run a forecast.")
 
-    st.header("3. AI Analysis")
-    st.session_state.report_language = st.selectbox("Report Language", ["English", "French"], key="report_lang_select", disabled=not gemini_configured)
+    st.header("3. AI Analysis & Reporting")
+    st.session_state.report_language = st.selectbox("AI Report Language", ["English", "French"], key="report_lang_select", disabled=not gemini_configured)
     
     # Generate AI Report Button
-    generate_report_button = st.button("Generate AI Report", key="show_report_btn", disabled=not gemini_configured, use_container_width=True)
+    generate_report_button = st.button("Generate AI Report", key="show_report_btn", disabled=not gemini_configured or st.session_state.forecast_results is None, use_container_width=True)
     if generate_report_button:
-        access_granted, message = check_feature_access()
-        if access_granted:
-            if not gemini_configured: st.error("AI Report disabled. Configure Gemini API Key.")
-            elif st.session_state.cleaned_data is not None and st.session_state.forecast_results is not None and st.session_state.evaluation_metrics is not None:
-                if firebase_initialized: log_visitor_activity("Sidebar", "generate_report", feature_used='AI Report')
-                with st.spinner(f"Generating AI report ({st.session_state.report_language})..."):
-                    st.session_state.ai_report = generate_gemini_report(
-                        st.session_state.cleaned_data, st.session_state.forecast_results,
-                        st.session_state.evaluation_metrics, st.session_state.report_language
-                    )
-                if st.session_state.ai_report and not st.session_state.ai_report.startswith("Error:"):
-                    st.success("AI report generated.")
-                    st.session_state.active_tab = 3
-                    st.rerun()
-                else: st.error(f"Failed to generate AI report. {st.session_state.ai_report}")
-            else: st.error("Data, forecast, and metrics needed. Run forecast first.")
+        if not gemini_configured:
+            st.error("AI Report generation is disabled. Gemini API Key is not configured.")
+        elif st.session_state.cleaned_data is not None and st.session_state.forecast_results is not None and st.session_state.evaluation_metrics is not None:
+            with st.spinner(f"Generating comprehensive AI report in {st.session_state.report_language}..."):
+                st.session_state.ai_report = generate_gemini_report(
+                    st.session_state.cleaned_data, st.session_state.forecast_results,
+                    st.session_state.evaluation_metrics, st.session_state.report_language
+                )
+            if st.session_state.ai_report and not st.session_state.ai_report.startswith("Error:"):
+                st.success("AI Report successfully generated.")
+                st.session_state.active_tab = "AI Report" # Switch to AI Report tab
+                log_session_activity("AI Report Generated", f"Language: {st.session_state.report_language}")
+                st.rerun()
+            else:
+                st.error(f"Failed to generate AI Report. {st.session_state.ai_report}")
+                log_session_activity("AI Report Generation Failed", f"Language: {st.session_state.report_language}, Error: See logs")
         else:
-            show_google_login_button()
-            if firebase_initialized: log_visitor_activity("Sidebar", "generate_report_denied", feature_used='AI Report')
+            st.error("Data, forecast results, and evaluation metrics are required to generate an AI report. Please run a forecast first.")
 
     # Download PDF Button
-    if st.button("Download Report (PDF)", key="download_report_btn", use_container_width=True):
-        if firebase_initialized: log_visitor_activity("Sidebar", "download_pdf")
+    if st.button("Download Full Report (PDF)", key="download_report_btn", disabled=st.session_state.forecast_results is None or st.session_state.ai_report is None, use_container_width=True):
         if st.session_state.forecast_results is not None and st.session_state.evaluation_metrics is not None and st.session_state.ai_report is not None and st.session_state.forecast_plot_fig is not None:
-            with st.spinner("Generating PDF report..."):
+            with st.spinner("Compiling PDF report... This may take a moment."):
                 try:
-                    pdf = FPDF(); pdf.add_page()
-                    font_path_dejavu = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-                    report_font = "Arial"
-                    if os.path.exists(font_path_dejavu):
-                        try: pdf.add_font("DejaVu", fname=font_path_dejavu, uni=True); report_font = "DejaVu"
-                        except RuntimeError as font_err: st.warning(f"Failed to add DejaVu font ({font_err}), using Arial.")
-                    else: st.warning(f"DejaVu font not found at {font_path_dejavu}, using Arial.")
-                        
-                    pdf.set_font(report_font, size=12); pdf.cell(0, 10, txt="DeepHydro AI Forecasting Report", new_x="LMARGIN", new_y="NEXT", align="C"); pdf.ln(5)
+                    pdf = FPDF()
+                    pdf.add_page()
                     
+                    # Try to add a Unicode font for broader language support
+                    report_font = "Helvetica" # Default fallback
+                    # Path for a common DejaVuSans font in Linux environments (often available on Render.com)
+                    font_path_dejavu = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf" 
+                    if os.path.exists(font_path_dejavu):
+                        try:
+                            pdf.add_font("DejaVu", fname=font_path_dejavu, uni=True)
+                            report_font = "DejaVu"
+                        except RuntimeError as font_err:
+                            st.warning(f"Failed to load DejaVu font ({font_err}), using Helvetica.")
+                    else:
+                        st.warning(f"DejaVu font not found at {font_path_dejavu}, using Helvetica. Some special characters may not render.")
+
+                    pdf.set_font(report_font, size=18)
+                    pdf.cell(0, 15, txt="DeepHydro AI Groundwater Forecasting Report", new_x="LMARGIN", new_y="NEXT", align="C")
+                    pdf.ln(10)
+
+                    # --- Embed Plot ---
                     plot_filename = "forecast_plot.png"
                     try:
-                        if st.session_state.forecast_plot_fig:
-                            st.session_state.forecast_plot_fig.write_image(plot_filename, scale=2)
-                            pdf.image(plot_filename, x=pdf.get_x(), y=pdf.get_y(), w=190)
-                            pdf.ln(125)
-                        else: pdf.cell(0, 10, txt="[Forecast plot unavailable]", new_x="LMARGIN", new_y="NEXT"); pdf.ln(5)
+                        # Save Plotly figure as a static image
+                        st.session_state.forecast_plot_fig.write_image(plot_filename, scale=2, width=1000, height=500)
+                        pdf.image(plot_filename, x=10, y=pdf.get_y(), w=190) # Adjust width (w) as needed
+                        pdf.ln(130) # Move cursor down after image
                     except Exception as img_err:
-                        st.warning(f"Could not embed plot image: {img_err}.")
-                        pdf.cell(0, 10, txt=f"[Error embedding plot: {img_err}]", new_x="LMARGIN", new_y="NEXT"); pdf.ln(5)
-                    finally: 
-                        if os.path.exists(plot_filename): os.remove(plot_filename)
-                        
-                    pdf.set_font(report_font, "B", size=11); pdf.cell(0, 10, txt="Model Evaluation Metrics", new_x="LMARGIN", new_y="NEXT"); pdf.ln(1)
-                    pdf.set_font(report_font, size=10)
+                        st.warning(f"Could not embed forecast plot image in PDF: {img_err}. Skipping plot.")
+                        pdf.set_font(report_font, "I", size=10)
+                        pdf.cell(0, 10, txt="[Forecast plot unavailable due to embedding error]", new_x="LMARGIN", new_y="NEXT")
+                        pdf.ln(5)
+                    finally:
+                        if os.path.exists(plot_filename):
+                            os.remove(plot_filename) # Clean up temporary image file
+
+                    # --- Model Evaluation Metrics ---
+                    pdf.set_font(report_font, "B", size=14)
+                    pdf.cell(0, 10, txt="Model Evaluation Metrics (Validation/Pseudo-Validation)", new_x="LMARGIN", new_y="NEXT")
+                    pdf.ln(2)
+                    pdf.set_font(report_font, size=11)
                     for key, value in st.session_state.evaluation_metrics.items():
-                        val_str = f"{value:.4f}" if isinstance(value, (float, np.floating)) and not np.isnan(value) else str(value)
-                        pdf.cell(0, 8, txt=f"{key}: {val_str}", new_x="LMARGIN", new_y="NEXT")
-                    pdf.ln(5)
+                        val_str = f"{value:.4f}" if isinstance(value, (float, np.floating)) and not np.isnan(value) else "N/A"
+                        pdf.cell(0, 8, txt=f"- {key}: {val_str}", new_x="LMARGIN", new_y="NEXT")
+                    pdf.ln(8)
+
+                    # --- Forecast Data Table ---
+                    pdf.set_font(report_font, "B", size=14)
+                    pdf.cell(0, 10, txt="AI Forecast Data (First 10 Rows)", new_x="LMARGIN", new_y="NEXT")
+                    pdf.ln(2)
+                    pdf.set_font(report_font, size=9)
                     
-                    pdf.set_font(report_font, "B", size=11); pdf.cell(0, 10, txt="Forecast Data (First 10 rows)", new_x="LMARGIN", new_y="NEXT"); pdf.ln(1)
-                    pdf.set_font(report_font, size=8); col_widths = [35, 35, 35, 35]
-                    pdf.cell(col_widths[0], 7, txt="Date", border=1); pdf.cell(col_widths[1], 7, txt="Forecast", border=1); pdf.cell(col_widths[2], 7, txt="Lower CI", border=1); pdf.cell(col_widths[3], 7, txt="Upper CI", border=1, new_x="LMARGIN", new_y="NEXT")
+                    # Table Headers
+                    col_widths = [35, 35, 35, 35] # Date, Forecast, Lower CI, Upper CI
+                    pdf.set_fill_color(220, 220, 220) # Light gray for headers
+                    pdf.cell(col_widths[0], 8, txt="Date", border=1, fill=True)
+                    pdf.cell(col_widths[1], 8, txt="AI Forecast", border=1, fill=True)
+                    pdf.cell(col_widths[2], 8, txt="Lower CI", border=1, fill=True)
+                    pdf.cell(col_widths[3], 8, txt="Upper CI", border=1, fill=True, new_x="LMARGIN", new_y="NEXT")
+                    
+                    # Table Rows
                     for _, row in st.session_state.forecast_results.head(10).iterrows():
-                        pdf.cell(col_widths[0], 6, txt=str(row["Date"].date()), border=1)
-                        pdf.cell(col_widths[1], 6, txt=f"{row['Forecast']:.2f}", border=1)
-                        pdf.cell(col_widths[2], 6, txt=f"{row['Lower_CI']:.2f}", border=1)
-                        pdf.cell(col_widths[3], 6, txt=f"{row['Upper_CI']:.2f}", border=1, new_x="LMARGIN", new_y="NEXT")
-                    pdf.ln(5)
-                    
-                    pdf.set_font(report_font, "B", size=11); pdf.cell(0, 10, txt=f"AI Report ({st.session_state.report_language})", new_x="LMARGIN", new_y="NEXT"); pdf.ln(1)
-                    pdf.set_font(report_font, size=10)
-                    pdf.multi_cell(0, 5, txt=st.session_state.ai_report)
-                    pdf.ln(5)
+                        pdf.cell(col_widths[0], 7, txt=str(row["Date"].date()), border=1)
+                        pdf.cell(col_widths[1], 7, txt=f"{row['Forecast']:.2f}", border=1)
+                        pdf.cell(col_widths[2], 7, txt=f"{row['Lower_CI']:.2f}", border=1)
+                        pdf.cell(col_widths[3], 7, txt=f"{row['Upper_CI']:.2f}", border=1, new_x="LMARGIN", new_y="NEXT")
+                    pdf.ln(8)
+
+                    # --- AI Report ---
+                    pdf.set_font(report_font, "B", size=14)
+                    pdf.cell(0, 10, txt=f"AI-Generated Scientific Report ({st.session_state.report_language})", new_x="LMARGIN", new_y="NEXT")
+                    pdf.ln(2)
+                    pdf.set_font(report_font, size=11)
+                    # For multi_cell, ensure text is UTF-8 encoded
+                    pdf.multi_cell(0, 6, txt=st.session_state.ai_report.encode('latin-1', 'replace').decode('latin-1'))
+                    pdf.ln(10)
                     
                     pdf_output_bytes = pdf.output(dest="S").encode("latin-1")
-                    st.download_button(label="Download PDF Now", data=pdf_output_bytes, file_name="deephydro_forecast_report.pdf", mime="application/pdf", key="pdf_download_final_btn", use_container_width=True)
-                    st.success("PDF ready. Click download button.")
-                    if firebase_initialized: log_visitor_activity("Sidebar", "download_pdf_success")
+                    st.download_button(
+                        label="Download PDF Report",
+                        data=pdf_output_bytes,
+                        file_name="DeepHydro_AI_Forecast_Report.pdf",
+                        mime="application/pdf",
+                        key="pdf_download_final_btn",
+                        use_container_width=True
+                    )
+                    st.success("PDF report generated successfully! Click the button above to download.")
+                    log_session_activity("PDF Report Downloaded", "Full report with forecast and AI analysis.")
                 except Exception as pdf_err:
-                    st.error(f"Failed to generate PDF: {pdf_err}")
-                    import traceback; st.error(traceback.format_exc())
-                    if firebase_initialized: log_visitor_activity("Sidebar", "download_pdf_failure")
-        else: st.error("Required data missing. Run forecast and generate AI report first.")
+                    st.error(f"Failed to generate PDF report: {pdf_err}")
+                    log_session_activity("PDF Report Generation Failed", f"Error: {pdf_err}")
+                    import traceback; st.error(traceback.format_exc()) # For debugging
+        else:
+            st.error("To download the PDF report, please first upload data, run a forecast, and generate an AI report.")
 
     st.header("4. AI Assistant")
     # Activate Chat Button
-    chat_button_label = "Deactivate Chat" if st.session_state.chat_active else "Activate Chat"
-    activate_chat_button = st.button(chat_button_label, key="chat_ai_btn", disabled=not gemini_configured, use_container_width=True)
+    chat_button_label = "Deactivate AI Chat" if st.session_state.chat_active else "Activate AI Chat"
+    activate_chat_button = st.button(chat_button_label, key="chat_ai_btn", disabled=not gemini_configured or st.session_state.forecast_results is None, use_container_width=True)
     if activate_chat_button:
         if st.session_state.chat_active:
-            st.session_state.chat_active = False; st.session_state.chat_history = []
-            if firebase_initialized: log_visitor_activity("Sidebar", "deactivate_chat")
-            st.rerun()
+            st.session_state.chat_active = False # Deactivate chat
+            st.session_state.chat_history = [] # Clear chat history
+            st.info("AI Chat deactivated.")
+            log_session_activity("AI Chat Deactivated", "Chat history cleared.")
+            st.rerun() # Rerun to update button label and chat area
         else:
-            access_granted, message = check_feature_access()
-            if access_granted:
-                st.session_state.chat_active = True; st.session_state.active_tab = 4
-                if firebase_initialized: log_visitor_activity("Sidebar", "activate_chat", feature_used='AI Chat')
-                st.rerun()
-            else:
-                show_google_login_button()
-                if firebase_initialized: log_visitor_activity("Sidebar", "activate_chat_denied", feature_used='AI Chat')
+            st.session_state.chat_active = True # Activate chat
+            st.session_state.active_tab = "AI Chatbot" # Switch to AI Chatbot tab
+            st.success("AI Chat activated! You can now ask questions about your data and forecast.")
+            log_session_activity("AI Chat Activated", "Ready for interaction.")
+            st.rerun() # Rerun to update button label and chat area
 
-    # About Us
-    st.markdown('<div class="about-us-header">👥 About Us</div>', unsafe_allow_html=True)
+    # About Us Section
+    st.markdown('<div class="about-us-header">👥 About DeepHydro AI</div>', unsafe_allow_html=True)
     st.markdown('<div class="about-us-content">', unsafe_allow_html=True)
-    st.markdown("Specializing in groundwater forecasting using AI.") 
-    st.markdown("**Contact:** [deephydro@example.com](mailto:deephydro@example.com)")
-    st.markdown("© 2025 DeepHydro AI Team")
+    st.markdown("""
+        DeepHydro AI specializes in advanced hydrological forecasting solutions using cutting-edge deep learning models.
+        Our mission is to empower water resource managers, environmental engineers, and researchers with accurate, interpretable,
+        and reliable predictions for critical water parameters like groundwater levels.
+        
+        **Our Expertise:**
+        * Deep Learning for Time Series Analysis
+        * Uncertainty Quantification (Monte Carlo Dropout)
+        * Hydrogeological Modeling & Interpretation
+        * Intuitive Data Visualization & Reporting
+        
+        **Contact Us:** [info@deephydro.ai](mailto:info@deephydro.ai)
+        
+        © 2025 DeepHydro AI. All rights reserved.
+    """)
     st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Admin Access
-    st.header("5. Admin")
-    if st.button("Analytics Dashboard", key="admin_analytics_btn", use_container_width=True):
-        if firebase_initialized: log_visitor_activity("Sidebar", "access_admin")
-        st.session_state.active_tab = 5
-        st.rerun()
 
-# --- Main Application Area --- 
-st.title("DeepHydro AI Forecasting")
-if firebase_initialized: log_visitor_activity("Main Page", "view")
+# --- Main Application Area ---
+st.title("DeepHydro AI: Advanced Groundwater Forecasting")
 
-# App Introduction
-st.markdown('<div class="app-intro">', unsafe_allow_html=True)
-st.markdown("""### Welcome to DeepHydro AI Forecasting
-Advanced groundwater forecasting platform using deep learning.
-**Features:** AI forecasting, MC Dropout uncertainty, AI interpretation, Interactive visualization.
-Upload your data to begin.""")
-st.markdown('</div>', unsafe_allow_html=True)
+# App Introduction Card
+st.markdown("""
+    <div class="app-intro">
+        <h3>Welcome to DeepHydro AI Forecasting Platform!</h3>
+        <p>
+            This powerful application enables you to analyze historical groundwater level data,
+            generate accurate forecasts with uncertainty estimates using advanced deep learning models,
+            and gain AI-powered insights.
+            Upload your data, configure your model, and let our AI assist you in understanding
+            future groundwater conditions.
+        </p>
+    </div>
+""", unsafe_allow_html=True)
 
-# Handle data upload
-if uploaded_data_file is not None:
-    if st.session_state.get("uploaded_data_filename") != uploaded_data_file.name:
-        st.session_state.uploaded_data_filename = uploaded_data_file.name
-        with st.spinner("Loading and cleaning data..."): 
-            cleaned_df_result = load_and_clean_data(uploaded_data_file.getvalue())
-        if cleaned_df_result is not None:
-            st.session_state.cleaned_data = cleaned_df_result
-            # Reset results
-            st.session_state.forecast_results = None; st.session_state.evaluation_metrics = None
-            st.session_state.training_history = None; st.session_state.ai_report = None
-            st.session_state.chat_history = []; st.session_state.scaler_object = None
-            st.session_state.forecast_plot_fig = None
-            st.session_state.model_sequence_length = STANDARD_MODEL_SEQUENCE_LENGTH
-            st.session_state.run_forecast_triggered = False
-            if firebase_initialized: log_visitor_activity("Data Upload", "upload_success")
-            st.rerun()
-        else:
-            st.session_state.cleaned_data = None
-            st.error("Data loading failed. Check file format/content.")
-            if firebase_initialized: log_visitor_activity("Data Upload", "upload_failure")
 
-# Define tabs
-tab_titles = ["Data Preview", "Forecast Results", "Model Evaluation", "AI Report", "AI Chatbot", "Admin Analytics"]
+# Define tabs for main content
+tab_titles = ["Data Preview", "Forecast Results", "Model Evaluation", "AI Report", "AI Chatbot", "Generic Data Analyzer", "Session Activity Log"]
 tabs = st.tabs(tab_titles)
-active_tab_index = st.session_state.get("active_tab", 0)
 
-# --- Tab Content --- 
+# Programmatic Tab Switching (if a button triggers a tab change)
+active_tab_index = tab_titles.index(st.session_state.get("active_tab", "Data Preview"))
+
+# --- Tab Content ---
 
 # Data Preview Tab
-with tabs[0]:
-    if firebase_initialized: log_visitor_activity("Tab: Data Preview", "view")
-    st.header("Uploaded & Cleaned Data Preview")
+with tabs[0]: # Data Preview
+    st.header("Historical Groundwater Data Overview")
     if st.session_state.cleaned_data is not None:
-        st.dataframe(st.session_state.cleaned_data)
-        st.write(f"Shape: {st.session_state.cleaned_data.shape}")
+        st.subheader("Raw Data Table (First 100 Rows)")
+        st.dataframe(st.session_state.cleaned_data.head(100), use_container_width=True) # Limit to 100 for large files
+        
         col1, col2 = st.columns(2)
-        with col1: st.metric("Time Range", f"{st.session_state.cleaned_data['Date'].min():%Y-%m-%d} to {st.session_state.cleaned_data['Date'].max():%Y-%m-%d}")
-        with col2: st.metric("Data Points", len(st.session_state.cleaned_data))
+        with col1:
+            st.metric("Total Data Points", len(st.session_state.cleaned_data))
+        with col2:
+            min_date = st.session_state.cleaned_data['Date'].min()
+            max_date = st.session_state.cleaned_data['Date'].max()
+            st.metric("Time Range", f"{min_date.strftime('%Y-%m-%d')} to {max_date.strftime('%Y-%m-%d')}")
+        
+        st.subheader("Interactive Plot of Historical Levels")
         fig_data = go.Figure()
-        fig_data.add_trace(go.Scatter(x=st.session_state.cleaned_data["Date"], y=st.session_state.cleaned_data["Level"], mode="lines", name="Level"))
-        fig_data.update_layout(title="Historical Groundwater Levels", xaxis_title="Date", yaxis_title="Level", template="plotly_white", margin=dict(l=20, r=20, t=40, b=20), height=400)
+        fig_data.add_trace(go.Scatter(x=st.session_state.cleaned_data["Date"], y=st.session_state.cleaned_data["Level"], 
+                                      mode="lines", name="Groundwater Level", line=dict(color="#3498db")))
+        fig_data.update_layout(
+            title="<b>Historical Groundwater Levels</b>",
+            xaxis_title="Date", 
+            yaxis_title="Groundwater Level", 
+            template="plotly_white", 
+            margin=dict(l=40, r=40, t=60, b=40), 
+            height=500,
+            font=dict(family="Inter", size=12),
+            title_font_size=18
+        )
         st.plotly_chart(fig_data, use_container_width=True)
     else:
-        st.info("⬆️ Upload XLSX data using the sidebar.")
+        st.info("⬆️ Please upload your groundwater level data (XLSX format) using the 'Data Management' section in the sidebar to begin.")
 
 # Forecast Results Tab
-with tabs[1]:
-    if firebase_initialized: log_visitor_activity("Tab: Forecast Results", "view")
-    st.header("Forecast Results")
+with tabs[1]: # Forecast Results
+    st.header("AI Forecast Results & Visualization")
     if st.session_state.forecast_results is not None and isinstance(st.session_state.forecast_results, pd.DataFrame) and not st.session_state.forecast_results.empty:
-        if st.session_state.forecast_plot_fig: st.plotly_chart(st.session_state.forecast_plot_fig, use_container_width=True)
-        else: st.warning("Forecast plot unavailable.")
-        st.subheader("Forecast Data Table")
+        if st.session_state.forecast_plot_fig:
+            st.subheader("Interactive AI Forecast Plot")
+            st.plotly_chart(st.session_state.forecast_plot_fig, use_container_width=True)
+        else:
+            st.warning("Forecast plot is not available. This might happen if the forecast pipeline encountered an issue.")
+        
+        st.subheader("Detailed AI Forecast Data Table")
         st.dataframe(st.session_state.forecast_results, use_container_width=True)
-    elif st.session_state.run_forecast_triggered: st.warning("Forecast run attempted, but no results available.")
-    else: st.info("Run a forecast (sidebar) to see results.")
+    elif st.session_state.run_forecast_triggered:
+        st.warning("The forecast pipeline was initiated, but no results are available. Please check for any error messages in the sidebar or above.")
+    else:
+        st.info("To view AI Forecast Results, please upload your data and click 'Run AI Forecast' in the sidebar.")
 
 # Model Evaluation Tab
-with tabs[2]:
-    if firebase_initialized: log_visitor_activity("Tab: Model Evaluation", "view")
-    st.header("Model Evaluation")
+with tabs[2]: # Model Evaluation
+    st.header("Deep Learning Model Performance Evaluation")
     if st.session_state.evaluation_metrics is not None and isinstance(st.session_state.evaluation_metrics, dict):
         st.subheader("Performance Metrics (Validation/Pseudo-Validation)")
         col1, col2, col3 = st.columns(3)
-        rmse_val = st.session_state.evaluation_metrics.get("RMSE", np.nan); mae_val = st.session_state.evaluation_metrics.get("MAE", np.nan); mape_val = st.session_state.evaluation_metrics.get("MAPE", np.nan)
-        col1.metric("RMSE", f"{rmse_val:.4f}" if not np.isnan(rmse_val) else "N/A")
-        col2.metric("MAE", f"{mae_val:.4f}" if not np.isnan(mae_val) else "N/A")
-        col3.metric("MAPE", f"{mape_val:.2f}%" if not np.isnan(mape_val) and mape_val != np.inf else ("N/A" if np.isnan(mape_val) else "Inf"))
-        st.subheader("Training Loss (if trained)")
+        rmse_val = st.session_state.evaluation_metrics.get("RMSE", np.nan)
+        mae_val = st.session_state.evaluation_metrics.get("MAE", np.nan)
+        mape_val = st.session_state.evaluation_metrics.get("MAPE", np.nan)
+        
+        col1.metric("Root Mean Squared Error (RMSE)", f"{rmse_val:.4f}" if not np.isnan(rmse_val) else "N/A")
+        col2.metric("Mean Absolute Error (MAE)", f"{mae_val:.4f}" if not np.isnan(mae_val) else "N/A")
+        col3.metric("Mean Absolute Percentage Error (MAPE)", f"{mape_val:.2f}%" if not np.isnan(mape_val) and mape_val != np.inf else ("N/A" if np.isnan(mape_val) else "Inf"))
+        
+        st.markdown("""
+            <p style="font-size:0.9em; color:gray;">
+                <b>RMSE</b>: Measures the average magnitude of the errors. Lower is better.<br>
+                <b>MAE</b>: Measures the average magnitude of the errors without considering direction. Less sensitive to outliers than RMSE.<br>
+                <b>MAPE</b>: Expresses error as a percentage of the actual value. Sensitive to zero or near-zero actual values.
+            </p>
+        """, unsafe_allow_html=True)
+
+        st.subheader("Training and Validation Loss (for newly trained models)")
         if st.session_state.training_history:
             loss_fig = create_loss_plot(st.session_state.training_history)
             st.plotly_chart(loss_fig, use_container_width=True)
-        else: st.info("No training history (pre-trained model or training failed).")
-    elif st.session_state.run_forecast_triggered: st.warning("Forecast run attempted, but no evaluation metrics available.")
-    else: st.info("Run a forecast (sidebar) to see evaluation.")
+            st.info("This plot shows how the model's performance on training and unseen validation data improved over epochs.")
+        else:
+            st.info("No training history available. This typically applies to pre-trained or custom uploaded models, or if training encountered an error.")
+    elif st.session_state.run_forecast_triggered:
+        st.warning("The forecast pipeline was initiated, but no evaluation metrics are available.")
+    else:
+        st.info("Run an AI forecast (sidebar) to see the model's performance evaluation.")
 
 # AI Report Tab
-with tabs[3]:
-    if firebase_initialized: log_visitor_activity("Tab: AI Report", "view")
+with tabs[3]: # AI Report
     st.header("AI-Generated Scientific Report")
-    if not gemini_configured: st.warning("AI features disabled. Configure Gemini API Key.")
-    if st.session_state.ai_report: 
-        st.markdown(f'<div class="chat-message ai-message">{st.session_state.ai_report}<span class="copy-tooltip">Copied!</span></div>', unsafe_allow_html=True)
-    else: st.info("Click 'Generate AI Report' (sidebar) after a forecast.")
+    if not gemini_configured:
+        st.warning("AI features are currently disabled. Please ensure the 'GOOGLE_API_KEY' environment variable is correctly set.")
+    if st.session_state.ai_report:
+        st.markdown(f"""
+            <div class="chat-message ai-message">
+                {st.session_state.ai_report}
+                <span class="copy-tooltip">Copied!</span>
+            </div>
+        """, unsafe_allow_html=True)
+        st.info("Click on the report to copy its content to your clipboard.")
+    else:
+        st.info("Click 'Generate AI Report' in the sidebar after running a forecast to get an AI-powered scientific interpretation.")
 
 # AI Chatbot Tab
-with tabs[4]:
-    if firebase_initialized: log_visitor_activity("Tab: AI Chatbot", "view")
-    st.header("AI Chatbot Assistant")
-    if not gemini_configured: st.warning("AI features disabled. Configure Gemini API Key.")
+with tabs[4]: # AI Chatbot
+    st.header("DeepHydro AI Assistant Chatbot")
+    if not gemini_configured:
+        st.warning("AI Chatbot is currently disabled. Please ensure the 'GOOGLE_API_KEY' environment variable is correctly set.")
     elif st.session_state.chat_active:
         if st.session_state.cleaned_data is not None and st.session_state.forecast_results is not None and st.session_state.evaluation_metrics is not None:
-            st.info("Chat activated. Ask about the results.")
-            chat_container = st.container(height=400) 
+            st.info("AI Chatbot activated. You can now ask questions about your historical data, the forecast, and the model evaluation results.")
+            
+            chat_container = st.container(height=500, border=True) # Fixed height for chat area
             with chat_container:
+                if not st.session_state.chat_history:
+                    st.markdown('<p style="text-align: center; color: gray;">Start the conversation by typing your question below.</p>', unsafe_allow_html=True)
                 for sender, message in st.session_state.chat_history:
                     msg_class = "user-message" if sender == "User" else "ai-message"
-                    st.markdown(f'<div class="chat-message {msg_class}">{message}<span class="copy-tooltip">Copied!</span></div>', unsafe_allow_html=True)
+                    st.markdown(f"""
+                        <div class="chat-message {msg_class}">
+                            <b>{sender}:</b> {message}
+                            <span class="copy-tooltip">Copied!</span>
+                        </div>
+                    """, unsafe_allow_html=True)
             
-            user_input = st.chat_input("Ask the AI assistant:")
+            user_input = st.chat_input("Ask the AI assistant about your groundwater data or forecast:")
             if user_input:
-                if firebase_initialized: log_visitor_activity("Chat", "send_message")
+                log_session_activity("AI Chat Query", user_input)
                 st.session_state.chat_history.append(("User", user_input))
-                with st.spinner("AI thinking..."): 
+                with st.spinner("AI is thinking..."):
                     ai_response = get_gemini_chat_response(
                         user_input, st.session_state.chat_history, st.session_state.cleaned_data,
                         st.session_state.forecast_results, st.session_state.evaluation_metrics, st.session_state.ai_report
                     )
                 st.session_state.chat_history.append(("AI", ai_response))
-                st.rerun()
+                log_session_activity("AI Chat Response", ai_response)
+                st.rerun() # Rerun to display new message
         else:
-            st.warning("Run a successful forecast first to provide context for the chatbot.")
-            st.session_state.chat_active = False
+            st.warning("Please upload groundwater data and run an AI forecast first to provide context for the chatbot.")
+            st.session_state.chat_active = False # Deactivate if context is missing
             st.rerun()
     else:
-        st.info("Click 'Activate Chat' (sidebar) after a forecast." if gemini_configured else "AI Chat disabled.")
+        st.info("Click 'Activate AI Chat' in the sidebar to interact with the AI assistant after a successful forecast.")
 
-# Admin Analytics Tab
-with tabs[5]:
-    if firebase_initialized: log_visitor_activity("Tab: Admin Analytics", "view")
-    render_admin_analytics()
+# Generic Data Analyzer Tab
+with tabs[5]: # Generic Data Analyzer
+    st.header("Generic Data Analyzer: Visualize Your Datasets")
+    st.info("Upload any CSV or Excel file to explore and visualize its contents. This feature is independent of the groundwater forecasting.")
+    
+    generic_uploaded_file = st.file_uploader("Upload Any Data File (CSV, XLSX)", type=["csv", "xlsx"], key="generic_data_uploader")
 
-# Ensure JavaScript is added at the end if it relies on elements rendered in tabs
-# add_javascript_functionality() # Moved to Page Configuration section
+    if generic_uploaded_file is not None:
+        if st.session_state.get("generic_uploaded_data_filename") != generic_uploaded_file.name:
+            st.session_state.generic_uploaded_data_filename = generic_uploaded_file.name
+            with st.spinner("Loading generic data..."):
+                try:
+                    if generic_uploaded_file.type == "text/csv":
+                        generic_df = pd.read_csv(generic_uploaded_file)
+                    else: # Assuming application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+                        generic_df = pd.read_excel(generic_uploaded_file, engine="openpyxl")
+                    st.session_state.generic_uploaded_data = generic_df
+                    st.success(f"Successfully loaded '{generic_uploaded_file.name}' with {len(generic_df)} rows and {len(generic_df.columns)} columns.")
+                    log_session_activity("Generic Data Upload", f"File: {generic_uploaded_file.name}, Rows: {len(generic_df)}")
+                except Exception as e:
+                    st.error(f"Error loading generic data: {e}. Please ensure it's a valid CSV or XLSX file.")
+                    st.session_state.generic_uploaded_data = None
+                    log_session_activity("Generic Data Upload Failed", f"File: {generic_uploaded_file.name}, Error: {e}")
+            st.rerun()
 
+    if st.session_state.generic_uploaded_data is not None:
+        generic_df = st.session_state.generic_uploaded_data
+        st.subheader("Data Preview (First 50 Rows)")
+        st.dataframe(generic_df.head(50), use_container_width=True)
+
+        st.subheader("Descriptive Statistics")
+        st.write(generic_df.describe())
+
+        st.subheader("Interactive Plotting")
+        all_columns = generic_df.columns.tolist()
+        numeric_columns = generic_df.select_dtypes(include=np.number).columns.tolist()
+        date_columns = generic_df.select_dtypes(include=['datetime', 'datetime64', 'datetime64[ns]']).columns.tolist()
+
+        col_plot1, col_plot2 = st.columns(2)
+        with col_plot1:
+            x_axis_col = st.selectbox("Select X-axis Column", options=[''] + all_columns, key="x_axis_col")
+        with col_plot2:
+            y_axis_col = st.selectbox("Select Y-axis Column", options=[''] + (numeric_columns if x_axis_col else all_columns), key="y_axis_col")
+        
+        col_plot3, col_plot4 = st.columns(2)
+        with col_plot3:
+            color_col = st.selectbox("Select Color Column (Optional)", options=[''] + all_columns, key="color_col")
+        with col_plot4:
+            size_col = st.selectbox("Select Size Column (Optional)", options=[''] + numeric_columns, key="size_col")
+        
+        chart_type = st.selectbox("Select Chart Type", ["Line Plot", "Scatter Plot", "Bar Chart", "Histogram", "Box Plot"], key="chart_type_select")
+
+        if x_axis_col and y_axis_col:
+            fig_generic = create_generic_data_plot(generic_df, x_axis_col, y_axis_col, color_col if color_col else None, size_col if size_col else None, chart_type)
+            st.plotly_chart(fig_generic, use_container_width=True)
+        else:
+            st.info("Select X and Y axis columns to generate a plot.")
+    else:
+        st.info("Upload a CSV or XLSX file above to start analyzing your data.")
+
+# Session Activity Log Tab
+with tabs[6]: # Session Activity Log
+    st.header("Current Session Activity Log")
+    st.info("This dashboard shows the actions you've taken during your current browsing session. This demonstrates the application's ability to track user engagement with key features.")
+    
+    if st.session_state.session_activity_log:
+        activity_df = pd.DataFrame(st.session_state.session_activity_log)
+        st.dataframe(activity_df, use_container_width=True)
+    else:
+        st.info("No activities logged in this session yet. Interact with the application to see activities appear here.")
+
+# --- End of Main Application Area ---
 
