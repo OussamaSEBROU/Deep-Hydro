@@ -25,6 +25,8 @@ import plotly.express as px
 from dotenv import load_dotenv
 import hashlib
 import streamlit.components.v1 as components # Import components
+import matplotlib.pyplot as plt # Added for autocorrelation plot
+from statsmodels.graphics.tsaplots import plot_acf # Added for autocorrelation plot
 
 # --- Constants ---
 # ADVANCED_FEATURE_LIMIT removed as features are now unlimited.
@@ -319,20 +321,15 @@ def get_custom_css():
     .sidebar h2 {
         font-size: 1.2rem;
     }
-    /* Style for sidebar buttons - RED COLOR */
     .sidebar .stButton>button {
         border-radius: 4px;
         font-weight: 500;
         transition: all 0.3s;
         padding: 0.5rem 1rem;
-        background-color: #E74C3C; /* Red color for sidebar buttons */
-        color: white; /* White text on red background */
-        border: 1px solid #E74C3C; /* Red border */
     }
     .sidebar .stButton>button:hover {
-        opacity: 0.9;
+        opacity: 0.8;
         box-shadow: 0 2px 5px rgba(0,0,0,0.2);
-        transform: translateY(-1px); /* Slight lift on hover */
     }
     .sidebar .stFileUploader, .sidebar .stSelectbox, .sidebar .stNumberInput, .sidebar .stCheckbox {
         margin-bottom: 0.8rem; /* Consistent spacing */
@@ -416,15 +413,17 @@ def get_custom_css():
         transform: translateY(-2px); /* Slight lift effect */
     }
 
-    /* Style for secondary buttons (e.g., download buttons if different styling is desired) */
-    .stDownloadButton > button {
-        background-color: var(--background-color);
-        color: var(--primary-color);
-        border: 1px solid var(--primary-color);
-    }
-    .stDownloadButton > button:hover {
-        background-color: var(--primary-color);
+    /* Style for sidebar Download PDF Button - RED */
+    div[data-testid*="download_report_btn"] > button {
+        background-color: #FF4B4B; /* Red color */
         color: white;
+        border: 1px solid #FF4B4B;
+        font-weight: 600;
+    }
+    div[data-testid*="download_report_btn"] > button:hover {
+        background-color: #e03e3e; /* Darker red on hover */
+        border-color: #e03e3e;
+        box-shadow: 0 4px 8px rgba(255, 75, 75, 0.3);
     }
 
     .css-1d391kg, .css-12oz5g7 { padding: 1rem; } 
@@ -1084,81 +1083,84 @@ def render_data_analysis_tab(cleaned_data, forecast_results):
     
     st.subheader("Historical Data Overview")
     st.dataframe(cleaned_data.describe().transpose())
+    st.write("This table provides a statistical summary of the uploaded historical groundwater level data, including count, mean, standard deviation, min/max values, and quartiles.")
 
     fig_hist = px.histogram(cleaned_data, x="Level", nbins=30, 
                             title="Distribution of Historical Groundwater Levels",
                             labels={"Level": "Groundwater Level"},
                             template="plotly_white")
     st.plotly_chart(fig_hist, use_container_width=True)
+    st.write("This histogram shows the frequency distribution of historical groundwater levels, helping to visualize common ranges and potential skewness.")
 
-    # Rolling Mean and Standard Deviation for Historical Data
-    st.subheader("Historical Data Trends: Rolling Statistics")
-    window_size = st.slider("Select rolling window size (days/points)", min_value=7, max_value=90, value=30, key="rolling_window_slider")
+    # Autocorrelation Plot for Historical Data
+    st.subheader("Autocorrelation of Historical Data")
+    try:
+        # Use Matplotlib for plot_acf, then convert to Plotly for consistency
+        fig_acf_mpl, ax_acf = plt.subplots(figsize=(10, 5))
+        plot_acf(cleaned_data["Level"], ax=ax_acf, lags=min(len(cleaned_data)//2 - 1, 50), title="Autocorrelation Function (ACF) of Historical Groundwater Levels")
+        ax_acf.set_xlabel("Lags")
+        ax_acf.set_ylabel("Autocorrelation Coefficient")
+        plt.tight_layout()
+        st.pyplot(fig_acf_mpl) # Streamlit can directly render Matplotlib figures
+        plt.close(fig_acf_mpl) # Close the Matplotlib figure to free memory
+        st.write("The Autocorrelation Function (ACF) plot helps identify patterns in the data over time, such as seasonality (peaks at regular intervals) or trends (slow decay).")
+    except Exception as e:
+        st.warning(f"Could not generate Autocorrelation plot: {e}. Ensure enough data points are available.")
     
-    if len(cleaned_data) >= window_size:
-        cleaned_data_rolling = cleaned_data.copy()
-        cleaned_data_rolling['Rolling Mean'] = cleaned_data_rolling['Level'].rolling(window=window_size).mean()
-        cleaned_data_rolling['Rolling Std'] = cleaned_data_rolling['Level'].rolling(window=window_size).std()
-
+    # Rolling Statistics for Historical Data
+    st.subheader("Rolling Statistics of Historical Data")
+    if len(cleaned_data) > 30: # Need enough data for rolling window
         fig_rolling = go.Figure()
-        fig_rolling.add_trace(go.Scatter(x=cleaned_data_rolling["Date"], y=cleaned_data_rolling["Level"],
-                                         mode="lines", name="Original Level", line=dict(color="lightgray", width=0.5)))
-        fig_rolling.add_trace(go.Scatter(x=cleaned_data_rolling["Date"], y=cleaned_data_rolling["Rolling Mean"],
-                                         mode="lines", name=f"Rolling Mean ({window_size} days)", line=dict(color="rgb(30, 144, 255)", width=2)))
-        fig_rolling.add_trace(go.Scatter(x=cleaned_data_rolling["Date"], y=cleaned_data_rolling["Rolling Std"],
-                                         mode="lines", name=f"Rolling Std Dev ({window_size} days)", line=dict(color="rgb(255, 127, 14)", dash='dash')))
-        fig_rolling.update_layout(title=f"Historical Groundwater Levels with Rolling Mean & Std Dev ({window_size}-point Window)",
-                                  xaxis_title="Date", yaxis_title="Groundwater Level", hovermode="x unified", template="plotly_white")
+        window_size = min(30, len(cleaned_data) - 1)
+        rolling_mean = cleaned_data["Level"].rolling(window=window_size).mean()
+        rolling_std = cleaned_data["Level"].rolling(window=window_size).std()
+
+        fig_rolling.add_trace(go.Scatter(x=cleaned_data["Date"], y=cleaned_data["Level"], mode="lines", name="Original Level", line=dict(color="lightgray", width=0.5), opacity=0.7))
+        fig_rolling.add_trace(go.Scatter(x=cleaned_data["Date"], y=rolling_mean, mode="lines", name=f"Rolling Mean ({window_size} days)", line=dict(color="rgb(30, 144, 255)", width=2)))
+        fig_rolling.add_trace(go.Scatter(x=cleaned_data["Date"], y=rolling_std, mode="lines", name=f"Rolling Std Dev ({window_size} days)", line=dict(color="rgb(255, 127, 14)", dash='dash', width=1.5)))
+        fig_rolling.update_layout(title=f"Rolling Mean and Standard Deviation (Window: {window_size} days)",
+                                  xaxis_title="Date", yaxis_title="Groundwater Level",
+                                  hovermode="x unified", template="plotly_white")
         st.plotly_chart(fig_rolling, use_container_width=True)
+        st.write("This plot shows the moving average and standard deviation, highlighting trends and changes in data variability over time.")
     else:
-        st.info(f"Not enough data points ({len(cleaned_data)}) for a rolling window of {window_size}. Increase data or decrease window size.")
+        st.info("Not enough data for rolling statistics plot (requires at least 30 data points).")
 
-
-    # Extreme Values
-    st.subheader("Extreme Values in Historical Data")
-    min_level = cleaned_data['Level'].min()
-    max_level = cleaned_data['Level'].max()
-    min_date = cleaned_data.loc[cleaned_data['Level'].idxmin()]['Date'].strftime('%Y-%m-%d')
-    max_date = cleaned_data.loc[cleaned_data['Level'].idxmax()]['Date'].strftime('%Y-%m-%d')
-
-    col_min, col_max = st.columns(2)
-    with col_min:
-        st.metric("Minimum Level Recorded", f"{min_level:.2f}", help=f"Recorded on {min_date}")
-    with col_max:
-        st.metric("Maximum Level Recorded", f"{max_level:.2f}", help=f"Recorded on {max_date}")
-
-    st.subheader("Quantile Analysis for Historical Data")
-    quantiles_historical = cleaned_data['Level'].quantile([0.25, 0.5, 0.75]).to_frame(name='Historical Level')
-    quantiles_historical.index = ['25th Percentile (Q1)', '50th Percentile (Median)', '75th Percentile (Q3)']
-    st.dataframe(quantiles_historical)
-
+    # Monthly Box Plot (if data spans multiple years)
+    if cleaned_data['Date'].dt.year.nunique() > 1:
+        st.subheader("Monthly Groundwater Level Distribution")
+        cleaned_data['Month'] = cleaned_data['Date'].dt.month_name()
+        month_order = ["January", "February", "March", "April", "May", "June", 
+                       "July", "August", "September", "October", "November", "December"]
+        cleaned_data['Month'] = pd.Categorical(cleaned_data['Month'], categories=month_order, ordered=True)
+        
+        fig_monthly_box = px.box(cleaned_data, x="Month", y="Level", 
+                                 title="Distribution of Groundwater Levels by Month",
+                                 labels={"Level": "Groundwater Level"},
+                                 template="plotly_white")
+        fig_monthly_box.update_layout(xaxis_title="Month", yaxis_title="Groundwater Level")
+        st.plotly_chart(fig_monthly_box, use_container_width=True)
+        st.write("This box plot shows the distribution of groundwater levels for each month across all years, indicating seasonal patterns and variability.")
 
     if forecast_results is not None:
         st.subheader("Forecasted Data Overview")
         st.dataframe(forecast_results[['Forecast', 'Lower_CI', 'Upper_CI']].describe().transpose())
+        st.write("This table provides a statistical summary of the forecasted groundwater levels, including the mean forecast and confidence intervals.")
 
         fig_forecast_hist = px.histogram(forecast_results, x="Forecast", nbins=30,
                                          title="Distribution of Forecasted Groundwater Levels",
                                          labels={"Forecast": "Forecasted Level"},
                                          template="plotly_white", color_discrete_sequence=[px.colors.qualitative.Plotly[1]]) # Orange color
         st.plotly_chart(fig_forecast_hist, use_container_width=True)
+        st.write("This histogram illustrates the distribution of the predicted groundwater levels over the forecast horizon.")
 
         st.subheader("Historical vs. Forecasted Data Comparison")
-        # Combined Box Plot
-        combined_level_data = pd.DataFrame({
+        # Combine data for comparison plot
+        combined_df = pd.DataFrame({
             'Level': pd.concat([cleaned_data['Level'], forecast_results['Forecast']]),
             'Type': ['Historical'] * len(cleaned_data) + ['Forecast'] * len(forecast_results)
         })
-        fig_boxplot = px.box(combined_level_data, x="Type", y="Level",
-                             title="Distribution Comparison: Historical vs. Forecasted Levels",
-                             labels={"Level": "Groundwater Level", "Type": "Data Type"},
-                             color="Type",
-                             color_discrete_map={'Historical': "rgb(30, 144, 255)", 'Forecast': "rgb(255, 127, 14)"},
-                             template="plotly_white")
-        st.plotly_chart(fig_boxplot, use_container_width=True)
-
-        # Combined Histogram (Density)
-        fig_combined_dist = px.histogram(combined_level_data, x="Level", color="Type", histnorm='probability density',
+        fig_combined_dist = px.histogram(combined_df, x="Level", color="Type", histnorm='probability density',
                                         barmode='overlay', opacity=0.7,
                                         title="Density Distribution: Historical vs. Forecasted Levels",
                                         labels={"Level": "Groundwater Level", "count": "Density"},
@@ -1166,6 +1168,7 @@ def render_data_analysis_tab(cleaned_data, forecast_results):
                                         template="plotly_white")
         fig_combined_dist.update_layout(bargap=0.1)
         st.plotly_chart(fig_combined_dist, use_container_width=True)
+        st.write("This overlaid histogram compares the density distributions of historical and forecasted groundwater levels, showing how the predicted levels align or differ from past observations.")
         
         st.subheader("Key Statistical Differences")
         col1, col2, col3 = st.columns(3)
@@ -1178,11 +1181,7 @@ def render_data_analysis_tab(cleaned_data, forecast_results):
         with col3:
             st.metric("Historical Range", f"{cleaned_data['Level'].max() - cleaned_data['Level'].min():.2f}")
             st.metric("Forecast Range", f"{forecast_results['Forecast'].max() - forecast_results['Forecast'].min():.2f}")
-
-        st.subheader("Quantile Analysis for Forecasted Data")
-        quantiles_forecasted = forecast_results['Forecast'].quantile([0.25, 0.5, 0.75]).to_frame(name='Forecasted Level')
-        quantiles_forecasted.index = ['25th Percentile (Q1)', '50th Percentile (Median)', '75th Percentile (Q3)']
-        st.dataframe(quantiles_forecasted)
+        st.write("These metrics highlight the central tendency, spread, and overall range differences between the historical and forecasted groundwater levels.")
 
     else:
         st.info("Run a forecast to see combined data analysis.")
@@ -1312,21 +1311,24 @@ with st.sidebar:
                 )
             if st.session_state.ai_report and not st.session_state.ai_report.startswith("Error:"):
                 st.success("AI report generated.")
-                st.session_state.active_tab = 4 # Switch to AI Report tab (now index 4)
+                st.session_state.active_tab = 4 # Switch to AI Report tab
                 st.rerun()
             else: st.error(f"Failed to generate AI report. {st.session_state.ai_report}")
         else: st.error("Data, forecast, and metrics needed. Run forecast first.")
 
-    # Download PDF Button
-    if st.button("Download Report (PDF)", key="download_report_btn", use_container_width=True):
+    # Download PDF Button - Styled Red
+    if st.button("Download Report (PDF)", key="download_report_btn", use_container_width=True): # Key is used for CSS targeting
         if firebase_initialized: log_visitor_activity("Sidebar", "download_pdf")
         if st.session_state.forecast_results is not None and st.session_state.evaluation_metrics is not None and st.session_state.ai_report is not None and st.session_state.forecast_plot_fig is not None:
             with st.spinner("Generating PDF report..."):
                 try:
-                    pdf = FPDF(); pdf.add_page()
+                    pdf = FPDF()
+                    pdf.add_page()
                     
-                    # Set font for professional look to standard Arial to avoid font issues
-                    report_font = "Arial" 
+                    # Set font for professional look - Using DejaVuSans for better Unicode support
+                    report_font = "DejaVuSans" 
+                    # FPDF has DejaVuSans built-in for uni=True by default for newer versions.
+                    # No need to add font files if relying on standard built-in ones.
                     pdf.set_font(report_font, "B", size=16)
                     pdf.cell(0, 10, txt="DeepHydro AI Forecasting Report", new_x="LMARGIN", new_y="NEXT", align="C")
                     pdf.set_font(report_font, size=10)
@@ -1338,8 +1340,7 @@ with st.sidebar:
                     plot_filename = "forecast_plot.png"
                     try:
                         if st.session_state.forecast_plot_fig:
-                            # Save plot with higher scale for better quality in PDF
-                            st.session_state.forecast_plot_fig.write_image(plot_filename, scale=3) 
+                            st.session_state.forecast_plot_fig.write_image(plot_filename, scale=2)
                             pdf.image(plot_filename, x=10, y=pdf.get_y(), w=190) # Adjust x, y, w for layout
                             pdf.ln(125) # Space after image, adjust based on image height
                         else: pdf.multi_cell(0, 10, txt="[Forecast plot unavailable]")
@@ -1391,6 +1392,7 @@ with st.sidebar:
                     # AI Report Section
                     pdf.set_font(report_font, "B", size=12); pdf.cell(0, 10, txt=f"4. AI Report ({st.session_state.report_language})", new_x="LMARGIN", new_y="NEXT"); pdf.ln(1)
                     pdf.set_font(report_font, size=10)
+                    # Use pdf.multi_cell for wrapping text in the AI report
                     pdf.multi_cell(0, 5, txt=st.session_state.ai_report)
                     pdf.ln(5)
                     
@@ -1399,7 +1401,8 @@ with st.sidebar:
                     pdf.set_font(report_font, 'I', 8) # Italic, 8pt
                     pdf.cell(0, 10, f'Page {pdf.page_no()}/{{nb}} - Generated by DeepHydro AI', 0, 0, 'C')
                     
-                    pdf_output_bytes = pdf.output(dest="S").encode("latin-1")
+                    # Fix: pdf.output(dest="S") already returns bytes, no need to encode again.
+                    pdf_output_bytes = pdf.output(dest="S")
                     st.download_button(label="Download PDF Now", data=pdf_output_bytes, file_name="deephydro_forecast_report.pdf", mime="application/pdf", key="pdf_download_final_btn", use_container_width=True)
                     st.success("PDF ready. Click download button.")
                     if firebase_initialized: log_visitor_activity("Sidebar", "download_pdf_success")
@@ -1420,7 +1423,7 @@ with st.sidebar:
             st.rerun()
         else:
             # Feature access is now unlimited, no check needed
-            st.session_state.chat_active = True; st.session_state.active_tab = 5 # Changed to 5 for AI Chatbot
+            st.session_state.chat_active = True; st.session_state.active_tab = 5 # Changed from 4 to 5
             if firebase_initialized: log_visitor_activity("Sidebar", "activate_chat", feature_used='AI Chat')
             st.rerun()
 
@@ -1436,7 +1439,7 @@ with st.sidebar:
     st.header("5. Admin")
     if st.button("Analytics Dashboard", key="admin_analytics_btn", use_container_width=True):
         if firebase_initialized: log_visitor_activity("Sidebar", "access_admin")
-        st.session_state.active_tab = 6 # Changed to 6 for Admin Analytics
+        st.session_state.active_tab = 6 # Changed from 5 to 6
         st.rerun()
 
 # --- Main Application Area --- 
@@ -1451,8 +1454,29 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
+# Handle data upload
+if uploaded_data_file is not None:
+    if st.session_state.get("uploaded_data_filename") != uploaded_data_file.name:
+        st.session_state.uploaded_data_filename = uploaded_data_file.name
+        with st.spinner("Loading and cleaning data..."): 
+            cleaned_df_result = load_and_clean_data(uploaded_data_file.getvalue())
+        if cleaned_df_result is not None:
+            st.session_state.cleaned_data = cleaned_df_result
+            # Reset results
+            st.session_state.forecast_results = None; st.session_state.evaluation_metrics = None
+            st.session_state.training_history = None; st.session_state.ai_report = None
+            st.session_state.chat_history = []; st.session_state.scaler_object = None
+            st.session_state.forecast_plot_fig = None
+            st.session_state.model_sequence_length = STANDARD_MODEL_SEQUENCE_LENGTH
+            st.session_state.run_forecast_triggered = False
+            if firebase_initialized: log_visitor_activity("Data Upload", "upload_success")
+            st.rerun()
+        else:
+            st.session_state.cleaned_data = None
+            st.error("Data loading failed. Check file format/content.")
+            if firebase_initialized: log_visitor_activity("Data Upload", "upload_failure")
+
 # Define tabs
-# Updated tab_titles to reflect new order
 tab_titles = ["Data Preview", "Forecast Results", "Model Evaluation", "Data Analysis & Statistics", "AI Report", "AI Chatbot", "Admin Analytics"]
 tabs = st.tabs(tab_titles)
 active_tab_index = st.session_state.get("active_tab", 0)
@@ -1532,12 +1556,12 @@ with tabs[2]:
     elif st.session_state.run_forecast_triggered: st.warning("Forecast run attempted, but no evaluation metrics available.")
     else: st.info("Run a forecast (sidebar) to see evaluation.")
 
-# Data Analysis & Statistics Tab (now at index 3)
+# Data Analysis & Statistics Tab
 with tabs[3]:
     if firebase_initialized: log_visitor_activity("Tab: Data Analysis & Statistics", "view")
     render_data_analysis_tab(st.session_state.cleaned_data, st.session_state.forecast_results)
 
-# AI Report Tab (now at index 4)
+# AI Report Tab
 with tabs[4]:
     if firebase_initialized: log_visitor_activity("Tab: AI Report", "view")
     st.header("AI-Generated Scientific Report")
@@ -1546,7 +1570,7 @@ with tabs[4]:
         st.markdown(f'<div class="chat-message ai-message">{st.session_state.ai_report}<span class="copy-tooltip">Copied!</span></div>', unsafe_allow_html=True)
     else: st.info("Click 'Generate AI Report' (sidebar) after a forecast.")
 
-# AI Chatbot Tab (now at index 5)
+# AI Chatbot Tab
 with tabs[5]:
     if firebase_initialized: log_visitor_activity("Tab: AI Chatbot", "view")
     st.header("AI Chatbot Assistant")
@@ -1578,7 +1602,7 @@ with tabs[5]:
     else:
         st.info("Click 'Activate Chat' (sidebar) after a forecast." if gemini_configured else "AI Chat disabled.")
 
-# Admin Analytics Tab (now at index 6)
+# Admin Analytics Tab
 with tabs[6]:
     if firebase_initialized: log_visitor_activity("Tab: Admin Analytics", "view")
     render_admin_analytics()
