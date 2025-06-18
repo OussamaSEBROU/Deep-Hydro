@@ -9,7 +9,7 @@ from tensorflow.keras.models import Sequential, load_model
 from tensorflow.keras.layers import LSTM, Dropout, Dense
 from tensorflow.keras.callbacks import EarlyStopping
 import plotly.graph_objects as go
-from fpdf import FPDF
+from fpdf import FPDF # Keep for font detection fallback, but not for direct PDF output now
 import google.generativeai as genai
 import io
 import base64
@@ -24,9 +24,12 @@ import requests
 import plotly.express as px
 from dotenv import load_dotenv
 import hashlib
-import streamlit.components.v1 as components # Import components
-import matplotlib.pyplot as plt # Added for autocorrelation plot
-from statsmodels.graphics.tsaplots import plot_acf # Added for autocorrelation plot
+import streamlit.components.v1 as components 
+import matplotlib.pyplot as plt 
+from statsmodels.graphics.tsaplots import plot_acf 
+from docx import Document # NEW: Import docx for Word document generation
+from docx.shared import Inches, Pt # NEW: For setting image size and font size in DOCX
+from docx.enum.text import WD_ALIGN_PARAGRAPH # NEW: For aligning paragraphs
 
 # --- Constants ---
 # ADVANCED_FEATURE_LIMIT removed as features are now unlimited.
@@ -338,19 +341,6 @@ def get_custom_css():
         box-shadow: 0 2px 5px rgba(255,75,75,0.4); /* More pronounced shadow */
         transform: translateY(-1px); /* Slight lift */
     }
-    /* Override for specific buttons if needed, e.g., the PDF download, though general rule applies */
-    div[data-testid*="download_report_btn"] > button {
-        background-color: #FF4B4B; /* Red color */
-        color: white;
-        border: 1px solid #FF4B4B;
-        font-weight: 600;
-    }
-    div[data-testid*="download_report_btn"] > button:hover {
-        background-color: #e03e3e; /* Darker red on hover */
-        border-color: #e03e3e;
-        box-shadow: 0 4px 8px rgba(255, 75, 75, 0.3);
-    }
-
 
     .sidebar .stFileUploader, .sidebar .stSelectbox, .sidebar .stNumberInput, .sidebar .stCheckbox {
         margin-bottom: 0.8rem; /* Consistent spacing */
@@ -431,7 +421,7 @@ def get_custom_css():
     }
     .stButton:not(.sidebar .stButton) > button:hover { 
         opacity: 0.9; 
-        box-shadow: 0 4px 12px rgba(0,0,0,0.1); /* More pronounced shadow on hover */
+        box_shadow: 0 4px 12px rgba(0,0,0,0.1); /* More pronounced shadow on hover */
         transform: translateY(-2px); /* Slight lift effect */
     }
 
@@ -968,6 +958,7 @@ def get_gemini_chat_response(user_query, chat_hist, hist_df, forecast_df, metric
             "- Compare historical and forecast data to infer changes in groundwater behavior.",
             "- Suggest potential implications for resource management, policy, or risk.",
             "- Structure your response directly, without an introduction.",
+            "- Keep responses conversational but highly professional and data-driven, like an expert providing insights.",
             "",
             "### Previous Conversation (for context):"
         ]
@@ -976,19 +967,19 @@ def get_gemini_chat_response(user_query, chat_hist, hist_df, forecast_df, metric
         context = "\n".join(context_parts)
         
         response = gemini_model_chat.generate_content(context)
-        forbidden_terms = ["lstm", "long short-term memory", "epoch", "layer", "dropout", "adam optimizer", "sequence length", "as an AI model", "I am an AI", "hello", "hi", "greetings"]
+        forbidden_terms = ["lstm", "long short-term memory", "epoch", "layer", "dropout", "adam optimizer", "sequence length", "as an AI model", "I am an AI", "hello", "hi", "greetings", "certainly", "absolutely", "of course"]
         cleaned_text = response.text
         for term in forbidden_terms: cleaned_text = cleaned_text.replace(term, "[modeling technique]")
         # Further refine to ensure no intros
-        if cleaned_text.lower().startswith(("hello", "hi", "greetings", "as an ai model", "i am an ai")):
+        if cleaned_text.lower().startswith(("hello", "hi", "greetings", "as an ai model", "i am an ai", "certainly", "absolutely", "of course")):
             # Find the first sentence and remove it if it sounds like an intro
             sentences = cleaned_text.split('.')
             if len(sentences) > 1:
                 first_sentence_lower = sentences[0].strip().lower()
-                if any(intro_phrase in first_sentence_lower for intro_phrase in ["hello", "hi", "greetings", "as an ai model", "i am an ai"]):
+                if any(intro_phrase in first_sentence_lower for intro_phrase in ["hello", "hi", "greetings", "as an ai model", "i am an ai", "certainly", "absolutely", "of course"]):
                     cleaned_text = '.'.join(sentences[1:]).strip()
             else: # If it's a single short sentence intro, try to remove it
-                if any(intro_phrase in cleaned_text.lower() for intro_phrase in ["hello", "hi", "greetings", "as an ai model", "i am an ai"]):
+                if any(intro_phrase in cleaned_text.lower() for intro_phrase in ["hello", "hi", "greetings", "as an ai model", "i am an ai", "certainly", "absolutely", "of course"]):
                     cleaned_text = "Analysis: " # Replace with generic starter if it was just an intro
         return cleaned_text.strip() # Ensure no leading/trailing whitespace
     except Exception as e: st.error(f"Error in AI chat: {e}"); return f"Error: {e}"
@@ -1349,118 +1340,114 @@ with st.sidebar:
             else: st.error(f"Failed to generate AI report. {st.session_state.ai_report}")
         else: st.error("Data, forecast, and metrics needed. Run forecast first.")
 
-    # Download PDF Button - Styled Red
-    if st.button("Download Report (PDF)", key="download_report_btn", use_container_width=True): # Key is used for CSS targeting
-        if firebase_initialized: log_visitor_activity("Sidebar", "download_pdf")
+    # Download Word Report Button (Replaced PDF)
+    if st.button("Download Report (DOCX)", key="download_report_btn", use_container_width=True): 
+        if firebase_initialized: log_visitor_activity("Sidebar", "download_docx_report")
         if st.session_state.forecast_results is not None and st.session_state.evaluation_metrics is not None and st.session_state.ai_report is not None and st.session_state.forecast_plot_fig is not None:
-            with st.spinner("Generating PDF report..."):
+            with st.spinner("Generating Word report..."):
                 try:
-                    pdf = FPDF()
-                    pdf.add_page()
+                    document = Document()
                     
-                    # Set font for professional look - Using DejaVuSans for better Unicode support
-                    report_font = "DejaVuSans" 
-                    # FPDF has DejaVuSans built-in for uni=True by default for newer versions.
-                    # Add bold variant explicitly.
-                    try:
-                        # Attempt to add DejaVuSans font files if they are in the environment
-                        # These paths are typical for Linux. Adjust for other OS if self-hosting.
-                        # On Streamlit Cloud, default fonts like 'Helvetica', 'Times', 'Courier', 'Arial' are safe.
-                        # For 'DejaVuSans', you might need to ensure the font files are packaged with your app.
-                        # Alternatively, use built-in fonts directly: pdf.set_font('Arial', 'B', size=16)
-                        pdf.add_font("DejaVuSans", fname="DejaVuSans.ttf", uni=True) # Assuming regular is available
-                        pdf.add_font("DejaVuSans", "B", fname="DejaVuSans-Bold.ttf", uni=True) # Adding bold variant
-                        st.info("Using DejaVuSans font for PDF.")
-                    except Exception as font_load_err:
-                        st.warning(f"Failed to load DejaVuSans font ({font_load_err}), falling back to Arial.")
-                        report_font = "Arial" # Fallback to a standard font
-                        pdf.set_font(report_font, "", size=10) # Set a default Arial font initially
-                    
-                    pdf.set_font(report_font, "B", size=16)
-                    pdf.cell(0, 10, txt="DeepHydro AI Forecasting Report", new_x="LMARGIN", new_y="NEXT", align="C")
-                    pdf.set_font(report_font, size=10)
-                    pdf.cell(0, 7, txt=f"Date Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}", new_x="LMARGIN", new_y="NEXT", align="C")
-                    pdf.ln(10) # Add some space
+                    # Set up default font for the document
+                    style = document.styles['Normal']
+                    font = style.font
+                    font.name = 'Calibri' # Professional font
+                    font.size = Pt(11)
 
-                    # Forecast Plot
-                    pdf.set_font(report_font, "B", size=12); pdf.cell(0, 10, txt="1. Forecast Visualization", new_x="LMARGIN", new_y="NEXT"); pdf.ln(1)
+                    # Title
+                    document.add_heading('DeepHydro AI Forecasting Report', level=0)
+                    document.add_paragraph(f"Date Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}")
+                    document.add_paragraph("\n") # Add some space
+
+                    # Forecast Visualization Section
+                    document.add_heading('1. Forecast Visualization', level=1)
                     plot_filename = "forecast_plot.png"
                     try:
                         if st.session_state.forecast_plot_fig:
                             st.session_state.forecast_plot_fig.write_image(plot_filename, scale=2)
-                            pdf.image(plot_filename, x=10, y=pdf.get_y(), w=190) # Adjust x, y, w for layout
-                            pdf.ln(125) # Space after image, adjust based on image height
-                        else: pdf.multi_cell(0, 10, txt="[Forecast plot unavailable]")
+                            document.add_picture(plot_filename, width=Inches(6)) # Adjust width as needed
+                            document.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER # Center the image
+                            document.add_paragraph("\n")
+                        else:
+                            document.add_paragraph("[Forecast plot unavailable]")
                     except Exception as img_err:
-                        st.warning(f"Could not embed plot image in PDF: {img_err}.")
-                        pdf.multi_cell(0, 10, txt=f"[Error embedding plot: {img_err}]")
-                    finally: 
+                        document.add_paragraph(f"[Error embedding plot: {img_err}]")
+                    finally:
                         if os.path.exists(plot_filename): os.remove(plot_filename)
-                    pdf.ln(5) # Space after section
 
-                    # Model Evaluation Metrics
-                    pdf.set_font(report_font, "B", size=12); pdf.cell(0, 10, txt="2. Model Evaluation Metrics", new_x="LMARGIN", new_y="NEXT"); pdf.ln(1)
-                    pdf.set_font(report_font, size=10)
-                    metrics_data = [
-                        ["Metric", "Value"],
-                        ["RMSE", f"{st.session_state.evaluation_metrics.get('RMSE', np.nan):.4f}" if not np.isnan(st.session_state.evaluation_metrics.get('RMSE', np.nan)) else "N/A"],
-                        ["MAE", f"{st.session_state.evaluation_metrics.get('MAE', np.nan):.4f}" if not np.isnan(st.session_state.evaluation_metrics.get('MAE', np.nan)) else "N/A"],
-                        ["MAPE", f"{st.session_state.evaluation_metrics.get('MAPE', np.nan):.2f}%" if not np.isnan(st.session_state.evaluation_metrics.get('MAPE', np.nan)) else "N/A"]
-                    ]
-                    # Table headers
-                    pdf.set_fill_color(220, 220, 220) # Light gray for header background
-                    pdf.set_font(report_font, "B", size=9)
-                    pdf.cell(50, 7, txt=metrics_data[0][0], border=1, fill=True)
-                    pdf.cell(50, 7, txt=metrics_data[0][1], border=1, new_x="LMARGIN", new_y="NEXT", fill=True)
-                    # Table data
-                    pdf.set_font(report_font, size=9)
-                    for row_data in metrics_data[1:]:
-                        pdf.cell(50, 6, txt=row_data[0], border=1)
-                        pdf.cell(50, 6, txt=row_data[1], border=1, new_x="LMARGIN", new_y="NEXT")
-                    pdf.ln(5)
+                    # Model Evaluation Metrics Section
+                    document.add_heading('2. Model Evaluation Metrics', level=1)
+                    metrics_table = document.add_table(rows=1, cols=2)
+                    metrics_table.style = 'Table Grid' # Add grid borders
+                    hdr_cells = metrics_table.rows[0].cells
+                    hdr_cells[0].text = "Metric"
+                    hdr_cells[1].text = "Value"
                     
-                    # Forecast Data Table
-                    pdf.set_font(report_font, "B", size=12); pdf.cell(0, 10, txt="3. Forecast Data (First 10 rows)", new_x="LMARGIN", new_y="NEXT"); pdf.ln(1)
-                    pdf.set_font(report_font, size=8); 
-                    col_widths = [35, 35, 35, 35] # Keep consistent widths
+                    # Set header font
+                    for cell in hdr_cells:
+                        cell.paragraphs[0].runs[0].font.bold = True
+                        cell.paragraphs[0].runs[0].font.size = Pt(10)
+                        
+                    metrics_data = {
+                        "RMSE": f"{st.session_state.evaluation_metrics.get('RMSE', np.nan):.4f}" if not np.isnan(st.session_state.evaluation_metrics.get('RMSE', np.nan)) else "N/A",
+                        "MAE": f"{st.session_state.evaluation_metrics.get('MAE', np.nan):.4f}" if not np.isnan(st.session_state.evaluation_metrics.get('MAE', np.nan)) else "N/A",
+                        "MAPE": f"{st.session_state.evaluation_metrics.get('MAPE', np.nan):.2f}%" if not np.isnan(st.session_state.evaluation_metrics.get('MAPE', np.nan)) else "N/A"
+                    }
+                    for metric, value in metrics_data.items():
+                        row_cells = metrics_table.add_row().cells
+                        row_cells[0].text = metric
+                        row_cells[1].text = value
+                        for cell in row_cells: # Set data cell font
+                            cell.paragraphs[0].runs[0].font.size = Pt(9)
+                    document.add_paragraph("\n")
+
+                    # Forecast Data Table Section
+                    document.add_heading('3. Forecast Data (First 10 rows)', level=1)
+                    forecast_table = document.add_table(rows=1, cols=4)
+                    forecast_table.style = 'Table Grid'
+                    hdr_cells = forecast_table.rows[0].cells
+                    hdr_cells[0].text = "Date"
+                    hdr_cells[1].text = "Forecast"
+                    hdr_cells[2].text = "Lower CI"
+                    hdr_cells[3].text = "Upper CI"
                     
-                    pdf.set_fill_color(220, 220, 220) # Light gray for header background
-                    pdf.set_font(report_font, "B", size=9)
-                    pdf.cell(col_widths[0], 7, txt="Date", border=1, fill=True); pdf.cell(col_widths[1], 7, txt="Forecast", border=1, fill=True); pdf.cell(col_widths[2], 7, txt="Lower CI", border=1, fill=True); pdf.cell(col_widths[3], 7, txt="Upper CI", border=1, new_x="LMARGIN", new_y="NEXT", fill=True)
-                    
-                    pdf.set_font(report_font, size=8)
+                    for cell in hdr_cells:
+                        cell.paragraphs[0].runs[0].font.bold = True
+                        cell.paragraphs[0].runs[0].font.size = Pt(10)
+
                     for _, row in st.session_state.forecast_results.head(10).iterrows():
-                        pdf.cell(col_widths[0], 6, txt=str(row["Date"].date()), border=1)
-                        pdf.cell(col_widths[1], 6, txt=f"{row['Forecast']:.2f}", border=1)
-                        pdf.cell(col_widths[2], 6, txt=f"{row['Lower_CI']:.2f}", border=1)
-                        pdf.cell(col_widths[3], 6, txt=f"{row['Upper_CI']:.2f}", border=1, new_x="LMARGIN", new_y="NEXT")
-                    pdf.ln(5)
-                    
+                        row_cells = forecast_table.add_row().cells
+                        row_cells[0].text = str(row["Date"].date())
+                        row_cells[1].text = f"{row['Forecast']:.2f}"
+                        row_cells[2].text = f"{row['Lower_CI']:.2f}"
+                        row_cells[3].text = f"{row['Upper_CI']:.2f}"
+                        for cell in row_cells: # Set data cell font
+                            cell.paragraphs[0].runs[0].font.size = Pt(9)
+                    document.add_paragraph("\n")
+
                     # AI Report Section
-                    pdf.set_font(report_font, "B", size=12); pdf.cell(0, 10, txt=f"4. AI Report ({st.session_state.report_language})", new_x="LMARGIN", new_y="NEXT"); pdf.ln(1)
-                    pdf.set_font(report_font, size=10)
-                    pdf.multi_cell(0, 5, txt=st.session_state.ai_report)
-                    pdf.ln(5)
+                    document.add_heading(f'4. AI Report ({st.session_state.report_language})', level=1)
+                    document.add_paragraph(st.session_state.ai_report)
+                    document.add_paragraph("\n")
                     
-                    # Footer
-                    pdf.set_y(-15) # Position at 1.5 cm from bottom
-                    pdf.set_font(report_font, 'I', 8) # Italic, 8pt
-                    pdf.cell(0, 10, f'Page {pdf.page_no()}/{{nb}} - Generated by DeepHydro AI', 0, 0, 'C')
-                    
-                    pdf_output_bytes = pdf.output(dest="S") # This already returns bytes. Removed .encode("latin-1")
-                    st.download_button(label="Download PDF Now", data=pdf_output_bytes, file_name="deephydro_forecast_report.pdf", mime="application/pdf", key="pdf_download_final_btn", use_container_width=True)
-                    st.success("PDF ready. Click download button.")
-                    if firebase_initialized: log_visitor_activity("Sidebar", "download_pdf_success")
-                except Exception as pdf_err:
-                    st.error(f"Failed to generate PDF: {pdf_err}")
+                    # Save document to a BytesIO object
+                    doc_buffer = io.BytesIO()
+                    document.save(doc_buffer)
+                    doc_buffer.seek(0) # Rewind the buffer
+
+                    st.download_button(label="Download DOCX Now", data=doc_buffer, file_name="deephydro_forecast_report.docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", key="docx_download_final_btn", use_container_width=True)
+                    st.success("Word document ready. Click download button.")
+                    if firebase_initialized: log_visitor_activity("Sidebar", "download_docx_success")
+                except Exception as docx_err:
+                    st.error(f"Failed to generate Word document: {docx_err}")
                     import traceback; st.error(traceback.format_exc())
-                    if firebase_initialized: log_visitor_activity("Sidebar", "download_pdf_failure")
+                    if firebase_initialized: log_visitor_activity("Sidebar", "download_docx_failure")
         else: st.error("Required data missing. Run forecast and generate AI report first.")
 
     st.header("4. AI Assistant")
     # Activate Chat Button
     chat_button_label = "Deactivate Chat" if st.session_state.chat_active else "Activate Chat"
-    activate_chat_button = st.button(chat_button_label, key="chat_ai_btn", disabled=not gemini_configured, use_container_width=True)
+    activate_chat_button = st.button(chat_button_label, key="chat_ai_btn", use_container_width=True, disabled=not gemini_configured)
     if activate_chat_button:
         if st.session_state.chat_active:
             st.session_state.chat_active = False; st.session_state.chat_history = []
@@ -1468,7 +1455,7 @@ with st.sidebar:
             st.rerun()
         else:
             # Feature access is now unlimited, no check needed
-            st.session_state.chat_active = True; st.session_state.active_tab = 5 # Changed from 4 to 5
+            st.session_state.chat_active = True; st.session_state.active_tab = 5 # Switch to AI Chatbot tab
             if firebase_initialized: log_visitor_activity("Sidebar", "activate_chat", feature_used='AI Chat')
             st.rerun()
 
@@ -1484,7 +1471,7 @@ with st.sidebar:
     st.header("5. Admin")
     if st.button("Analytics Dashboard", key="admin_analytics_btn", use_container_width=True):
         if firebase_initialized: log_visitor_activity("Sidebar", "access_admin")
-        st.session_state.active_tab = 6 # Changed from 5 to 6
+        st.session_state.active_tab = 6 # Switch to Admin Analytics tab
         st.rerun()
 
 # --- Main Application Area --- 
