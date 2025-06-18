@@ -126,7 +126,7 @@ def get_session_id():
     """Create or retrieve a unique session ID."""
     if 'session_id' not in st.session_state:
         st.session_state.session_id = str(uuid.uuid4())
-    return st.session_state.session_id
+    return st.session_id
 
 def log_visitor_activity(page_name, action="page_view", feature_used=None):
     """Log visitor activity to Firebase."""
@@ -963,7 +963,7 @@ def get_gemini_chat_response(user_query, chat_hist, hist_df, forecast_df, metric
             "### Previous Conversation (for context):"
         ]
         for sender, message in chat_hist[-6:]: context_parts.append(f"{sender}: {message}")
-        context_parts.append(f"User: {user_query}"); context_parts.append("AI:") # This "AI:" is just a prompt, not an intro
+        context_parts.append(f"User: {user_query}"); context_parts.append("AI:") 
         context = "\n".join(context_parts)
         
         response = gemini_model_chat.generate_content(context)
@@ -980,8 +980,8 @@ def get_gemini_chat_response(user_query, chat_hist, hist_df, forecast_df, metric
                     cleaned_text = '.'.join(sentences[1:]).strip()
             else: # If it's a single short sentence intro, try to remove it
                 if any(intro_phrase in cleaned_text.lower() for intro_phrase in ["hello", "hi", "greetings", "as an ai model", "i am an ai", "certainly", "absolutely", "of course"]):
-                    cleaned_text = "Analysis: " # Replace with generic starter if it was just an intro
-        return cleaned_text.strip() # Ensure no leading/trailing whitespace
+                    cleaned_text = "Analysis: " 
+        return cleaned_text.strip() 
     except Exception as e: st.error(f"Error in AI chat: {e}"); return f"Error: {e}"
 
 # --- Main Forecasting Pipeline --- 
@@ -1377,10 +1377,10 @@ st.markdown(f"""
 
 # Handle data upload
 if uploaded_data_file is not None:
-    if st.session_state.get("uploaded_data_filename") != uploaded_data_file.name:
-        st.session_state.uploaded_data_filename = uploaded_data_file.name
+    if st.session_state.get("uploaded_data_filename") != uploaded_file.name: # Use uploaded_file.name
+        st.session_state.uploaded_data_filename = uploaded_file.name
         with st.spinner("Loading and cleaning data..."): 
-            cleaned_df_result = load_and_clean_data(uploaded_data_file.getvalue())
+            cleaned_df_result = load_and_clean_data(uploaded_file.getvalue())
         if cleaned_df_result is not None:
             st.session_state.cleaned_data = cleaned_df_result
             # Reset results
@@ -1397,7 +1397,7 @@ if uploaded_data_file is not None:
             st.error("Data loading failed. Check file format/content.")
             if firebase_initialized: log_visitor_activity("Data Upload", "upload_failure")
 
-# Define tabs (removed key argument to fix TypeError)
+# Define tabs (Removed 'key' argument to fix TypeError)
 tab_titles = ["Data Preview", "Forecast Results", "Model Evaluation", "Data Analysis & Statistics", "AI Report", "AI Chatbot", "Admin Analytics"]
 tabs = st.tabs(tab_titles, active_tab=st.session_state.active_tab) 
 
@@ -1491,48 +1491,51 @@ with tabs[4]:
 
         # Download Word Report Button - Moved from Sidebar to Main Area (AI Report Tab)
         st.subheader("Download Report")
-        if st.session_state.forecast_results is not None and st.session_state.evaluation_metrics is not None and st.session_state.ai_report is not None and st.session_state.forecast_plot_fig is not None:
-            # The DOCX generation happens when the user clicks this download button
-            # This is a direct download button, not a trigger for a separate process.
+        # Check if necessary data for report generation is available
+        if st.session_state.forecast_results is not None and \
+           st.session_state.evaluation_metrics is not None and \
+           st.session_state.ai_report is not None and \
+           st.session_state.forecast_plot_fig is not None:
+            
+            # Create a BytesIO object to store the document in memory
             docx_buffer = io.BytesIO()
             document = Document()
             
             # Set up default font for the document
             style = document.styles['Normal']
             font = style.font
-            font.name = 'Calibri' # Professional font
+            font.name = 'Calibri' 
             font.size = Pt(11)
 
             # Title
             document.add_heading('DeepHydro AI Forecasting Report', level=0)
             document.add_paragraph(f"Date Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}")
-            document.add_paragraph("\n") # Add some space
+            document.add_paragraph("\n") 
 
             # Forecast Visualization Section
             document.add_heading('1. Forecast Visualization', level=1)
             plot_filename = "forecast_plot.png"
             try:
                 if st.session_state.forecast_plot_fig:
-                    st.session_state.forecast_plot_fig.write_image(plot_filename, scale=2) # Scale for higher quality
-                    document.add_picture(plot_filename, width=Inches(6.5)) # Slightly wider for better fit
-                    document.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER # Center the image
+                    st.session_state.forecast_plot_fig.write_image(plot_filename, scale=2) 
+                    document.add_picture(plot_filename, width=Inches(6.5)) 
+                    document.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER 
                     document.add_paragraph("\n")
                 else:
                     document.add_paragraph("[Forecast plot unavailable]")
             except Exception as img_err:
                 document.add_paragraph(f"[Error embedding plot: {img_err}]")
             finally:
-                if os.path.exists(plot_filename): os.remove(plot_filename) # Clean up image file
+                if os.path.exists(plot_filename): os.remove(plot_filename) 
 
             # Model Evaluation Metrics Section
             document.add_heading('2. Model Evaluation Metrics', level=1)
             metrics_table = document.add_table(rows=1, cols=2)
-            metrics_table.style = 'Table Grid' # Add grid borders
+            metrics_table.style = 'Table Grid' 
             hdr_cells = metrics_table.rows[0].cells
             hdr_cells[0].text = "Metric"
             hdr_cells[1].text = "Value"
             
-            # Set header font
             for cell in hdr_cells:
                 cell.paragraphs[0].runs[0].font.bold = True
                 cell.paragraphs[0].runs[0].font.size = Pt(10)
@@ -1546,7 +1549,7 @@ with tabs[4]:
                 row_cells = metrics_table.add_row().cells
                 row_cells[0].text = metric
                 row_cells[1].text = value
-                for cell in row_cells: # Set data cell font
+                for cell in row_cells: 
                     cell.paragraphs[0].runs[0].font.size = Pt(9)
             document.add_paragraph("\n")
 
@@ -1570,28 +1573,27 @@ with tabs[4]:
                 row_cells[1].text = f"{row['Forecast']:.2f}"
                 row_cells[2].text = f"{row['Lower_CI']:.2f}"
                 row_cells[3].text = f"{row['Upper_CI']:.2f}"
-                for cell in row_cells: # Set data cell font
+                for cell in row_cells: 
                     cell.paragraphs[0].runs[0].font.size = Pt(9)
             document.add_paragraph("\n")
 
             # AI Report Section
             document.add_heading(f'4. AI Report ({st.session_state.report_language})', level=1)
-            # Split AI report into paragraphs
-            for para_text in st.session_state.ai_report.split('\n\n'): # Split by double newline for paragraphs
+            for para_text in st.session_state.ai_report.split('\n\n'): 
                 if para_text.strip():
                     document.add_paragraph(para_text.strip())
             document.add_paragraph("\n")
             
-            # Save document to a BytesIO object
+            # Save document to BytesIO
             document.save(docx_buffer)
-            docx_buffer.seek(0) # Rewind the buffer
-
+            docx_buffer.seek(0) # Rewind buffer for download
+            
             st.download_button(
                 label="Download Report (DOCX)", 
                 data=docx_buffer, 
                 file_name="deephydro_forecast_report.docx", 
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", 
-                key="docx_download_final_btn", 
+                key="docx_download_final_btn_tab", # Renamed key to avoid conflict if any from sidebar
                 use_container_width=True
             )
             st.success("Word document generated. Click the button above to download.")
@@ -1639,4 +1641,3 @@ with tabs[6]:
     if firebase_initialized: log_visitor_activity("Tab: Admin Analytics", "view")
     render_admin_analytics()
 
-# No explicit button needed to refresh tab, st.rerun() handles synchronization.
