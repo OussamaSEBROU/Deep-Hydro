@@ -240,7 +240,8 @@ def render_admin_analytics():
     if not st.session_state.admin_authenticated:
         st.info("Admin access required.")
         admin_password = st.text_input("Admin Password", type="password", key="admin_pass_input")
-        if st.button("Login", key="admin_login_btn"):
+        # Added a login button explicitly
+        if st.button("Login", key="admin_login_btn", use_container_width=True): # Key is used to avoid duplicate widget error, use_container_width for styling
             correct_password = os.getenv("ADMIN_PASSWORD", "admin123")
             if admin_password == correct_password:
                 st.session_state.admin_authenticated = True
@@ -321,16 +322,36 @@ def get_custom_css():
     .sidebar h2 {
         font-size: 1.2rem;
     }
-    .sidebar .stButton>button {
+    /* ALL sidebar buttons styling - RED */
+    .sidebar .stButton > button {
         border-radius: 4px;
         font-weight: 500;
         transition: all 0.3s;
         padding: 0.5rem 1rem;
+        background-color: #FF4B4B; /* Red color */
+        color: white;
+        border: 1px solid #FF4B4B;
     }
-    .sidebar .stButton>button:hover {
-        opacity: 0.8;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+    .sidebar .stButton > button:hover {
+        background-color: #e03e3e; /* Darker red on hover */
+        border-color: #e03e3e;
+        box-shadow: 0 2px 5px rgba(255,75,75,0.4); /* More pronounced shadow */
+        transform: translateY(-1px); /* Slight lift */
     }
+    /* Override for specific buttons if needed, e.g., the PDF download, though general rule applies */
+    div[data-testid*="download_report_btn"] > button {
+        background-color: #FF4B4B; /* Red color */
+        color: white;
+        border: 1px solid #FF4B4B;
+        font-weight: 600;
+    }
+    div[data-testid*="download_report_btn"] > button:hover {
+        background-color: #e03e3e; /* Darker red on hover */
+        border-color: #e03e3e;
+        box-shadow: 0 4px 8px rgba(255, 75, 75, 0.3);
+    }
+
+
     .sidebar .stFileUploader, .sidebar .stSelectbox, .sidebar .stNumberInput, .sidebar .stCheckbox {
         margin-bottom: 0.8rem; /* Consistent spacing */
     }
@@ -398,7 +419,8 @@ def get_custom_css():
         margin-bottom: 0.5rem;
     }
 
-    .stButton > button { 
+    /* Primary buttons outside sidebar - blue */
+    .stButton:not(.sidebar .stButton) > button { 
         border-radius: 8px; /* Slightly more rounded buttons */
         font-weight: 600; /* Bolder button text */
         transition: all 0.3s ease-in-out; 
@@ -407,23 +429,21 @@ def get_custom_css():
         background-color: var(--primary-color);
         color: white; /* White text on primary background */
     }
-    .stButton > button:hover { 
+    .stButton:not(.sidebar .stButton) > button:hover { 
         opacity: 0.9; 
         box-shadow: 0 4px 12px rgba(0,0,0,0.1); /* More pronounced shadow on hover */
         transform: translateY(-2px); /* Slight lift effect */
     }
 
-    /* Style for sidebar Download PDF Button - RED */
-    div[data-testid*="download_report_btn"] > button {
-        background-color: #FF4B4B; /* Red color */
-        color: white;
-        border: 1px solid #FF4B4B;
-        font-weight: 600;
+    /* Style for download buttons (e.g., CSV/XLSX) if different styling is desired) */
+    .stDownloadButton > button {
+        background-color: var(--background-color);
+        color: var(--primary-color);
+        border: 1px solid var(--primary-color);
     }
-    div[data-testid*="download_report_btn"] > button:hover {
-        background-color: #e03e3e; /* Darker red on hover */
-        border-color: #e03e3e;
-        box-shadow: 0 4px 8px rgba(255, 75, 75, 0.3);
+    .stDownloadButton > button:hover {
+        background-color: var(--primary-color);
+        color: white;
     }
 
     .css-1d391kg, .css-12oz5g7 { padding: 1rem; } 
@@ -923,10 +943,12 @@ def get_gemini_chat_response(user_query, chat_hist, hist_df, forecast_df, metric
     if not gemini_configured: return "AI chat disabled. Configure Gemini API Key."
     if hist_df is None or forecast_df is None or metrics is None: return "Error: Insufficient context for AI chat."
     try:
+        # Refined persona and removal of intro phrases
         context_parts = [
-            "You are a senior AI and hydrogeology expert with over 20 years of experience in groundwater analysis and predictive modeling.",
-            "Your task is to interpret the following groundwater data and forecasts, and provide a professional engineering-style report.",
+            "You are an experienced hydrogeologist and data analyst with over 10 years of experience in groundwater analysis and predictive modeling.",
+            "Your task is to interpret the following groundwater data and forecasts.",
             "**IMPORTANT: Do NOT discuss internal AI model mechanics. Focus only on data interpretation, patterns, trends, uncertainties, and implications for groundwater behavior.**",
+            "**Do NOT add any introductory phrases before your answer.** Start directly with the analysis.",
             "",
             "### Historical Groundwater Summary:",
             hist_df["Level"].describe().to_string(),
@@ -940,24 +962,35 @@ def get_gemini_chat_response(user_query, chat_hist, hist_df, forecast_df, metric
             ai_report if ai_report else "(No prior AI report available.)",
             "",
             "### Instructions:",
-            "- Write in the style of a senior data analyst or hydrogeological engineer's report.",
+            "- Provide insights from an experienced hydrogeologist and data analyst (10 years experience).",
             "- Identify trends, anomalies, and seasonal patterns in groundwater level data.",
             "- Explain the forecast ranges (CI) and what they imply for groundwater conditions.",
             "- Compare historical and forecast data to infer changes in groundwater behavior.",
             "- Suggest potential implications for resource management, policy, or risk.",
-            "- Structure the output as: Executive Summary, Data Insights, Forecast Interpretation, Recommendations.",
+            "- Structure your response directly, without an introduction.",
             "",
             "### Previous Conversation (for context):"
         ]
         for sender, message in chat_hist[-6:]: context_parts.append(f"{sender}: {message}")
-        context_parts.append(f"User: {user_query}"); context_parts.append("AI:")
+        context_parts.append(f"User: {user_query}"); context_parts.append("AI:") # This "AI:" is just a prompt, not an intro
         context = "\n".join(context_parts)
         
         response = gemini_model_chat.generate_content(context)
-        forbidden_terms = ["lstm", "long short-term memory", "epoch", "layer", "dropout", "adam optimizer", "sequence length"]
+        forbidden_terms = ["lstm", "long short-term memory", "epoch", "layer", "dropout", "adam optimizer", "sequence length", "as an AI model", "I am an AI", "hello", "hi", "greetings"]
         cleaned_text = response.text
         for term in forbidden_terms: cleaned_text = cleaned_text.replace(term, "[modeling technique]")
-        return cleaned_text
+        # Further refine to ensure no intros
+        if cleaned_text.lower().startswith(("hello", "hi", "greetings", "as an ai model", "i am an ai")):
+            # Find the first sentence and remove it if it sounds like an intro
+            sentences = cleaned_text.split('.')
+            if len(sentences) > 1:
+                first_sentence_lower = sentences[0].strip().lower()
+                if any(intro_phrase in first_sentence_lower for intro_phrase in ["hello", "hi", "greetings", "as an ai model", "i am an ai"]):
+                    cleaned_text = '.'.join(sentences[1:]).strip()
+            else: # If it's a single short sentence intro, try to remove it
+                if any(intro_phrase in cleaned_text.lower() for intro_phrase in ["hello", "hi", "greetings", "as an ai model", "i am an ai"]):
+                    cleaned_text = "Analysis: " # Replace with generic starter if it was just an intro
+        return cleaned_text.strip() # Ensure no leading/trailing whitespace
     except Exception as e: st.error(f"Error in AI chat: {e}"); return f"Error: {e}"
 
 # --- Main Forecasting Pipeline --- 
@@ -1328,7 +1361,21 @@ with st.sidebar:
                     # Set font for professional look - Using DejaVuSans for better Unicode support
                     report_font = "DejaVuSans" 
                     # FPDF has DejaVuSans built-in for uni=True by default for newer versions.
-                    # No need to add font files if relying on standard built-in ones.
+                    # Add bold variant explicitly.
+                    try:
+                        # Attempt to add DejaVuSans font files if they are in the environment
+                        # These paths are typical for Linux. Adjust for other OS if self-hosting.
+                        # On Streamlit Cloud, default fonts like 'Helvetica', 'Times', 'Courier', 'Arial' are safe.
+                        # For 'DejaVuSans', you might need to ensure the font files are packaged with your app.
+                        # Alternatively, use built-in fonts directly: pdf.set_font('Arial', 'B', size=16)
+                        pdf.add_font("DejaVuSans", fname="DejaVuSans.ttf", uni=True) # Assuming regular is available
+                        pdf.add_font("DejaVuSans", "B", fname="DejaVuSans-Bold.ttf", uni=True) # Adding bold variant
+                        st.info("Using DejaVuSans font for PDF.")
+                    except Exception as font_load_err:
+                        st.warning(f"Failed to load DejaVuSans font ({font_load_err}), falling back to Arial.")
+                        report_font = "Arial" # Fallback to a standard font
+                        pdf.set_font(report_font, "", size=10) # Set a default Arial font initially
+                    
                     pdf.set_font(report_font, "B", size=16)
                     pdf.cell(0, 10, txt="DeepHydro AI Forecasting Report", new_x="LMARGIN", new_y="NEXT", align="C")
                     pdf.set_font(report_font, size=10)
@@ -1371,7 +1418,7 @@ with st.sidebar:
                         pdf.cell(50, 6, txt=row_data[0], border=1)
                         pdf.cell(50, 6, txt=row_data[1], border=1, new_x="LMARGIN", new_y="NEXT")
                     pdf.ln(5)
-
+                    
                     # Forecast Data Table
                     pdf.set_font(report_font, "B", size=12); pdf.cell(0, 10, txt="3. Forecast Data (First 10 rows)", new_x="LMARGIN", new_y="NEXT"); pdf.ln(1)
                     pdf.set_font(report_font, size=8); 
@@ -1392,7 +1439,6 @@ with st.sidebar:
                     # AI Report Section
                     pdf.set_font(report_font, "B", size=12); pdf.cell(0, 10, txt=f"4. AI Report ({st.session_state.report_language})", new_x="LMARGIN", new_y="NEXT"); pdf.ln(1)
                     pdf.set_font(report_font, size=10)
-                    # Use pdf.multi_cell for wrapping text in the AI report
                     pdf.multi_cell(0, 5, txt=st.session_state.ai_report)
                     pdf.ln(5)
                     
@@ -1401,8 +1447,7 @@ with st.sidebar:
                     pdf.set_font(report_font, 'I', 8) # Italic, 8pt
                     pdf.cell(0, 10, f'Page {pdf.page_no()}/{{nb}} - Generated by DeepHydro AI', 0, 0, 'C')
                     
-                    # Fix: pdf.output(dest="S") already returns bytes, no need to encode again.
-                    pdf_output_bytes = pdf.output(dest="S")
+                    pdf_output_bytes = pdf.output(dest="S") # This already returns bytes. Removed .encode("latin-1")
                     st.download_button(label="Download PDF Now", data=pdf_output_bytes, file_name="deephydro_forecast_report.pdf", mime="application/pdf", key="pdf_download_final_btn", use_container_width=True)
                     st.success("PDF ready. Click download button.")
                     if firebase_initialized: log_visitor_activity("Sidebar", "download_pdf_success")
