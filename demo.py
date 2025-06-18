@@ -1377,10 +1377,11 @@ st.markdown(f"""
 
 # Handle data upload
 if uploaded_data_file is not None:
-    if st.session_state.get("uploaded_data_filename") != uploaded_file.name: # Use uploaded_file.name
-        st.session_state.uploaded_data_filename = uploaded_file.name
+    # Corrected the variable name from `uploaded_file` to `uploaded_data_file`
+    if st.session_state.get("uploaded_data_filename") != uploaded_data_file.name:
+        st.session_state.uploaded_data_filename = uploaded_data_file.name
         with st.spinner("Loading and cleaning data..."): 
-            cleaned_df_result = load_and_clean_data(uploaded_file.getvalue())
+            cleaned_df_result = load_and_clean_data(uploaded_data_file.getvalue())
         if cleaned_df_result is not None:
             st.session_state.cleaned_data = cleaned_df_result
             # Reset results
