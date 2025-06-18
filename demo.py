@@ -349,7 +349,7 @@ def get_custom_css():
     }
     .sidebar .stExpander {
         border: none;
-        box-shadow: none;
+        box_shadow: none;
         background-color: transparent;
     }
     .sidebar .stExpander header {
@@ -421,7 +421,7 @@ def get_custom_css():
     }
     .stButton:not(.stSidebar .stButton) > button:hover { 
         opacity: 0.9; 
-        box-shadow: 0 4px 12px rgba(0,0,0,0.1); /* More pronounced shadow on hover */
+        box_shadow: 0 4px 12px rgba(0,0,0,0.1); /* More pronounced shadow on hover */
         transform: translateY(-2px); /* Slight lift effect */
     }
 
@@ -441,7 +441,7 @@ def get_custom_css():
         border-radius: 12px; /* More rounded cards */
         padding: 1.5rem; /* Increased card padding */
         margin-bottom: 1.5rem; /* More space between cards */
-        box-shadow: 0 4px 12px rgba(0,0,0,0.08); /* Stronger, softer shadow */
+        box_shadow: 0 4px 12px rgba(0,0,0,0.08); /* Stronger, softer shadow */
         background-color: var(--secondary-background-color); /* Use secondary background for cards */
         border: 1px solid rgba(128, 128, 128, 0.1); /* Subtle border */
     }
@@ -477,7 +477,7 @@ def get_custom_css():
         background-color: #555; 
         color: white; 
         z-index: 10; 
-        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        box_shadow: 0 2px 4px rgba(0,0,0,0.2);
     }
     .chat-message:active .copy-tooltip { display: block; }
     .stTabs [data-baseweb="tab-list"] { 
@@ -519,7 +519,7 @@ def get_custom_css():
         border-left: 8px solid var(--primary-color); /* Thicker blue border */
         background-color: var(--secondary-background-color); 
         color: var(--text-color);
-        box-shadow: 0 6px 20px rgba(0,0,0,0.15); /* Stronger intro shadow */
+        box_shadow: 0 6px 20px rgba(0,0,0,0.15); /* Stronger intro shadow */
     }
     .app-intro h3 {
         font-size: 1.8rem;
@@ -1398,9 +1398,11 @@ if uploaded_data_file is not None:
             st.error("Data loading failed. Check file format/content.")
             if firebase_initialized: log_visitor_activity("Data Upload", "upload_failure")
 
-# Define tabs (Removed 'key' argument to fix TypeError)
+# Define tabs (Removed 'key' and 'active_tab' argument to fix TypeError)
 tab_titles = ["Data Preview", "Forecast Results", "Model Evaluation", "Data Analysis & Statistics", "AI Report", "AI Chatbot", "Admin Analytics"]
-tabs = st.tabs(tab_titles, active_tab=st.session_state.active_tab) 
+# Removed active_tab = st.session_state.active_tab to fix TypeError.
+# This means the tabs will default to the first one on rerun, and you'll need to click them.
+tabs = st.tabs(tab_titles) 
 
 # --- Tab Content --- 
 
@@ -1594,7 +1596,7 @@ with tabs[4]:
                 data=docx_buffer, 
                 file_name="deephydro_forecast_report.docx", 
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", 
-                key="docx_download_final_btn_tab", # Renamed key to avoid conflict if any from sidebar
+                key="docx_download_final_btn_tab", 
                 use_container_width=True
             )
             st.success("Word document generated. Click the button above to download.")
