@@ -9,7 +9,7 @@ from tensorflow.keras.models import Sequential, load_model
 from tensorflow.keras.layers import LSTM, Dropout, Dense
 from tensorflow.keras.callbacks import EarlyStopping
 import plotly.graph_objects as go
-from fpdf import FPDF # Keep for font detection fallback, but not for direct PDF output now
+# from fpdf import FPDF # Removed FPDF as we are moving to DOCX
 import google.generativeai as genai
 import io
 import base64
@@ -27,9 +27,9 @@ import hashlib
 import streamlit.components.v1 as components 
 import matplotlib.pyplot as plt 
 from statsmodels.graphics.tsaplots import plot_acf 
-from docx import Document # NEW: Import docx for Word document generation
-from docx.shared import Inches, Pt # NEW: For setting image size and font size in DOCX
-from docx.enum.text import WD_ALIGN_PARAGRAPH # NEW: For aligning paragraphs
+from docx import Document 
+from docx.shared import Inches, Pt 
+from docx.enum.text import WD_ALIGN_PARAGRAPH 
 
 # --- Constants ---
 # ADVANCED_FEATURE_LIMIT removed as features are now unlimited.
@@ -127,7 +127,7 @@ def get_session_id():
     """Create or retrieve a unique session ID."""
     if 'session_id' not in st.session_state:
         st.session_state.session_id = str(uuid.uuid4())
-    return st.session_state.session_id
+    return st.session_id
 
 def log_visitor_activity(page_name, action="page_view", feature_used=None):
     """Log visitor activity to Firebase."""
@@ -331,15 +331,15 @@ def get_custom_css():
         font-weight: 500;
         transition: all 0.3s;
         padding: 0.5rem 1rem;
-        background-color: #FF4B4B; /* Red color */
-        color: white;
-        border: 1px solid #FF4B4B;
+        background-color: #FF4B4B !important; /* Red color, !important to override */
+        color: white !important;
+        border: 1px solid #FF4B4B !important;
     }
     .sidebar .stButton > button:hover {
-        background-color: #e03e3e; /* Darker red on hover */
-        border-color: #e03e3e;
-        box-shadow: 0 2px 5px rgba(255,75,75,0.4); /* More pronounced shadow */
-        transform: translateY(-1px); /* Slight lift */
+        background-color: #e03e3e !important; /* Darker red on hover */
+        border-color: #e03e3e !important;
+        box-shadow: 0 2px 5px rgba(255,75,75,0.4) !important; /* More pronounced shadow */
+        transform: translateY(-1px) !important; /* Slight lift */
     }
 
     .sidebar .stFileUploader, .sidebar .stSelectbox, .sidebar .stNumberInput, .sidebar .stCheckbox {
@@ -421,7 +421,7 @@ def get_custom_css():
     }
     .stButton:not(.sidebar .stButton) > button:hover { 
         opacity: 0.9; 
-        box_shadow: 0 4px 12px rgba(0,0,0,0.1); /* More pronounced shadow on hover */
+        box-shadow: 0 4px 12px rgba(0,0,0,0.1); /* More pronounced shadow on hover */
         transform: translateY(-2px); /* Slight lift effect */
     }
 
@@ -1281,10 +1281,9 @@ with st.sidebar:
     mc_iterations_sidebar = st.number_input("MC Dropout Iterations (C.I.)", min_value=20, max_value=500, value=100, step=10, key="mc_iter_in")
     forecast_horizon_sidebar = st.number_input("Forecast Horizon (steps)", min_value=1, max_value=100, value=12, step=1, key="horizon_in")
 
-    # Run Forecast Button
+    # Run Forecast Button (clicking this will switch to Forecast Results tab)
     run_forecast_button = st.button("Run Forecast", key="run_forecast_main_btn", use_container_width=True)
     if run_forecast_button:
-        # Feature access is now unlimited, so no check needed
         st.session_state.run_forecast_triggered = True
         if st.session_state.cleaned_data is not None:
             if model_choice == "Upload Custom .h5 Model" and not custom_model_file_obj_sidebar:
@@ -1321,10 +1320,9 @@ with st.sidebar:
     st.header("3. AI Analysis")
     st.session_state.report_language = st.selectbox("Report Language", ["English", "French"], key="report_lang_select", disabled=not gemini_configured)
     
-    # Generate AI Report Button
+    # Generate AI Report Button (clicking this will switch to AI Report tab)
     generate_report_button = st.button("Generate AI Report", key="show_report_btn", disabled=not gemini_configured, use_container_width=True)
     if generate_report_button:
-        # Feature access is now unlimited, no check needed
         if not gemini_configured: st.error("AI Report disabled. Configure Gemini API Key.")
         elif st.session_state.cleaned_data is not None and st.session_state.forecast_results is not None and st.session_state.evaluation_metrics is not None:
             if firebase_initialized: log_visitor_activity("Sidebar", "generate_report", feature_used='AI Report')
@@ -1340,121 +1338,15 @@ with st.sidebar:
             else: st.error(f"Failed to generate AI report. {st.session_state.ai_report}")
         else: st.error("Data, forecast, and metrics needed. Run forecast first.")
 
-    # Download Word Report Button (Replaced PDF)
-    if st.button("Download Report (DOCX)", key="download_report_btn", use_container_width=True): 
-        if firebase_initialized: log_visitor_activity("Sidebar", "download_docx_report")
-        if st.session_state.forecast_results is not None and st.session_state.evaluation_metrics is not None and st.session_state.ai_report is not None and st.session_state.forecast_plot_fig is not None:
-            with st.spinner("Generating Word report..."):
-                try:
-                    document = Document()
-                    
-                    # Set up default font for the document
-                    style = document.styles['Normal']
-                    font = style.font
-                    font.name = 'Calibri' # Professional font
-                    font.size = Pt(11)
-
-                    # Title
-                    document.add_heading('DeepHydro AI Forecasting Report', level=0)
-                    document.add_paragraph(f"Date Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}")
-                    document.add_paragraph("\n") # Add some space
-
-                    # Forecast Visualization Section
-                    document.add_heading('1. Forecast Visualization', level=1)
-                    plot_filename = "forecast_plot.png"
-                    try:
-                        if st.session_state.forecast_plot_fig:
-                            st.session_state.forecast_plot_fig.write_image(plot_filename, scale=2)
-                            document.add_picture(plot_filename, width=Inches(6)) # Adjust width as needed
-                            document.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER # Center the image
-                            document.add_paragraph("\n")
-                        else:
-                            document.add_paragraph("[Forecast plot unavailable]")
-                    except Exception as img_err:
-                        document.add_paragraph(f"[Error embedding plot: {img_err}]")
-                    finally:
-                        if os.path.exists(plot_filename): os.remove(plot_filename)
-
-                    # Model Evaluation Metrics Section
-                    document.add_heading('2. Model Evaluation Metrics', level=1)
-                    metrics_table = document.add_table(rows=1, cols=2)
-                    metrics_table.style = 'Table Grid' # Add grid borders
-                    hdr_cells = metrics_table.rows[0].cells
-                    hdr_cells[0].text = "Metric"
-                    hdr_cells[1].text = "Value"
-                    
-                    # Set header font
-                    for cell in hdr_cells:
-                        cell.paragraphs[0].runs[0].font.bold = True
-                        cell.paragraphs[0].runs[0].font.size = Pt(10)
-                        
-                    metrics_data = {
-                        "RMSE": f"{st.session_state.evaluation_metrics.get('RMSE', np.nan):.4f}" if not np.isnan(st.session_state.evaluation_metrics.get('RMSE', np.nan)) else "N/A",
-                        "MAE": f"{st.session_state.evaluation_metrics.get('MAE', np.nan):.4f}" if not np.isnan(st.session_state.evaluation_metrics.get('MAE', np.nan)) else "N/A",
-                        "MAPE": f"{st.session_state.evaluation_metrics.get('MAPE', np.nan):.2f}%" if not np.isnan(st.session_state.evaluation_metrics.get('MAPE', np.nan)) else "N/A"
-                    }
-                    for metric, value in metrics_data.items():
-                        row_cells = metrics_table.add_row().cells
-                        row_cells[0].text = metric
-                        row_cells[1].text = value
-                        for cell in row_cells: # Set data cell font
-                            cell.paragraphs[0].runs[0].font.size = Pt(9)
-                    document.add_paragraph("\n")
-
-                    # Forecast Data Table Section
-                    document.add_heading('3. Forecast Data (First 10 rows)', level=1)
-                    forecast_table = document.add_table(rows=1, cols=4)
-                    forecast_table.style = 'Table Grid'
-                    hdr_cells = forecast_table.rows[0].cells
-                    hdr_cells[0].text = "Date"
-                    hdr_cells[1].text = "Forecast"
-                    hdr_cells[2].text = "Lower CI"
-                    hdr_cells[3].text = "Upper CI"
-                    
-                    for cell in hdr_cells:
-                        cell.paragraphs[0].runs[0].font.bold = True
-                        cell.paragraphs[0].runs[0].font.size = Pt(10)
-
-                    for _, row in st.session_state.forecast_results.head(10).iterrows():
-                        row_cells = forecast_table.add_row().cells
-                        row_cells[0].text = str(row["Date"].date())
-                        row_cells[1].text = f"{row['Forecast']:.2f}"
-                        row_cells[2].text = f"{row['Lower_CI']:.2f}"
-                        row_cells[3].text = f"{row['Upper_CI']:.2f}"
-                        for cell in row_cells: # Set data cell font
-                            cell.paragraphs[0].runs[0].font.size = Pt(9)
-                    document.add_paragraph("\n")
-
-                    # AI Report Section
-                    document.add_heading(f'4. AI Report ({st.session_state.report_language})', level=1)
-                    document.add_paragraph(st.session_state.ai_report)
-                    document.add_paragraph("\n")
-                    
-                    # Save document to a BytesIO object
-                    doc_buffer = io.BytesIO()
-                    document.save(doc_buffer)
-                    doc_buffer.seek(0) # Rewind the buffer
-
-                    st.download_button(label="Download DOCX Now", data=doc_buffer, file_name="deephydro_forecast_report.docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", key="docx_download_final_btn", use_container_width=True)
-                    st.success("Word document ready. Click download button.")
-                    if firebase_initialized: log_visitor_activity("Sidebar", "download_docx_success")
-                except Exception as docx_err:
-                    st.error(f"Failed to generate Word document: {docx_err}")
-                    import traceback; st.error(traceback.format_exc())
-                    if firebase_initialized: log_visitor_activity("Sidebar", "download_docx_failure")
-        else: st.error("Required data missing. Run forecast and generate AI report first.")
-
-    st.header("4. AI Assistant")
-    # Activate Chat Button
+    # AI Assistant Activate Chat Button (clicking this will switch to AI Chatbot tab)
     chat_button_label = "Deactivate Chat" if st.session_state.chat_active else "Activate Chat"
-    activate_chat_button = st.button(chat_button_label, key="chat_ai_btn", use_container_width=True, disabled=not gemini_configured)
+    activate_chat_button = st.button(chat_button_label, key="chat_ai_btn_sidebar", use_container_width=True, disabled=not gemini_configured)
     if activate_chat_button:
         if st.session_state.chat_active:
             st.session_state.chat_active = False; st.session_state.chat_history = []
             if firebase_initialized: log_visitor_activity("Sidebar", "deactivate_chat")
             st.rerun()
         else:
-            # Feature access is now unlimited, no check needed
             st.session_state.chat_active = True; st.session_state.active_tab = 5 # Switch to AI Chatbot tab
             if firebase_initialized: log_visitor_activity("Sidebar", "activate_chat", feature_used='AI Chat')
             st.rerun()
@@ -1467,9 +1359,9 @@ with st.sidebar:
     st.markdown("© 2025 DeepHydro AI Team")
     st.markdown('</div>', unsafe_allow_html=True)
     
-    # Admin Access
+    # Admin Access (clicking this will switch to Admin Analytics tab)
     st.header("5. Admin")
-    if st.button("Analytics Dashboard", key="admin_analytics_btn", use_container_width=True):
+    if st.button("Analytics Dashboard", key="admin_analytics_btn_sidebar", use_container_width=True):
         if firebase_initialized: log_visitor_activity("Sidebar", "access_admin")
         st.session_state.active_tab = 6 # Switch to Admin Analytics tab
         st.rerun()
@@ -1510,8 +1402,7 @@ if uploaded_data_file is not None:
 
 # Define tabs
 tab_titles = ["Data Preview", "Forecast Results", "Model Evaluation", "Data Analysis & Statistics", "AI Report", "AI Chatbot", "Admin Analytics"]
-tabs = st.tabs(tab_titles)
-active_tab_index = st.session_state.get("active_tab", 0)
+tabs = st.tabs(tab_titles, key="main_tabs", active_tab=st.session_state.active_tab) # Synchronize active tab
 
 # --- Tab Content --- 
 
@@ -1600,7 +1491,128 @@ with tabs[4]:
     if not gemini_configured: st.warning("AI features disabled. Configure Gemini API Key.")
     if st.session_state.ai_report: 
         st.markdown(f'<div class="chat-message ai-message">{st.session_state.ai_report}<span class="copy-tooltip">Copied!</span></div>', unsafe_allow_html=True)
-    else: st.info("Click 'Generate AI Report' (sidebar) after a forecast.")
+
+        # Download Word Report Button - Moved from Sidebar
+        if st.session_state.forecast_results is not None and st.session_state.evaluation_metrics is not None and st.session_state.ai_report is not None and st.session_state.forecast_plot_fig is not None:
+            st.subheader("Download Report")
+            docx_placeholder = st.empty()
+            
+            # Generate the DOCX file in memory when the button is pressed
+            if st.button("Download Report (DOCX)", key="download_report_btn_main", use_container_width=True):
+                with st.spinner("Generating Word report... This might take a moment."):
+                    try:
+                        document = Document()
+                        
+                        # Set up default font for the document
+                        style = document.styles['Normal']
+                        font = style.font
+                        font.name = 'Calibri' # Professional font
+                        font.size = Pt(11)
+
+                        # Title
+                        document.add_heading('DeepHydro AI Forecasting Report', level=0)
+                        document.add_paragraph(f"Date Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}")
+                        document.add_paragraph("\n") # Add some space
+
+                        # Forecast Visualization Section
+                        document.add_heading('1. Forecast Visualization', level=1)
+                        plot_filename = "forecast_plot.png"
+                        try:
+                            if st.session_state.forecast_plot_fig:
+                                st.session_state.forecast_plot_fig.write_image(plot_filename, scale=2) # Scale for higher quality
+                                document.add_picture(plot_filename, width=Inches(6.5)) # Slightly wider for better fit
+                                document.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER # Center the image
+                                document.add_paragraph("\n")
+                            else:
+                                document.add_paragraph("[Forecast plot unavailable]")
+                        except Exception as img_err:
+                            document.add_paragraph(f"[Error embedding plot: {img_err}]")
+                        finally:
+                            if os.path.exists(plot_filename): os.remove(plot_filename) # Clean up image file
+
+                        # Model Evaluation Metrics Section
+                        document.add_heading('2. Model Evaluation Metrics', level=1)
+                        metrics_table = document.add_table(rows=1, cols=2)
+                        metrics_table.style = 'Table Grid' # Add grid borders
+                        hdr_cells = metrics_table.rows[0].cells
+                        hdr_cells[0].text = "Metric"
+                        hdr_cells[1].text = "Value"
+                        
+                        # Set header font
+                        for cell in hdr_cells:
+                            cell.paragraphs[0].runs[0].font.bold = True
+                            cell.paragraphs[0].runs[0].font.size = Pt(10)
+                            
+                        metrics_data = {
+                            "RMSE": f"{st.session_state.evaluation_metrics.get('RMSE', np.nan):.4f}" if not np.isnan(st.session_state.evaluation_metrics.get('RMSE', np.nan)) else "N/A",
+                            "MAE": f"{st.session_state.evaluation_metrics.get('MAE', np.nan):.4f}" if not np.isnan(st.session_state.evaluation_metrics.get('MAE', np.nan)) else "N/A",
+                            "MAPE": f"{st.session_state.evaluation_metrics.get('MAPE', np.nan):.2f}%" if not np.isnan(st.session_state.evaluation_metrics.get('MAPE', np.nan)) else "N/A"
+                        }
+                        for metric, value in metrics_data.items():
+                            row_cells = metrics_table.add_row().cells
+                            row_cells[0].text = metric
+                            row_cells[1].text = value
+                            for cell in row_cells: # Set data cell font
+                                cell.paragraphs[0].runs[0].font.size = Pt(9)
+                        document.add_paragraph("\n")
+
+                        # Forecast Data Table Section
+                        document.add_heading('3. Forecast Data (First 10 rows)', level=1)
+                        forecast_table = document.add_table(rows=1, cols=4)
+                        forecast_table.style = 'Table Grid'
+                        hdr_cells = forecast_table.rows[0].cells
+                        hdr_cells[0].text = "Date"
+                        hdr_cells[1].text = "Forecast"
+                        hdr_cells[2].text = "Lower CI"
+                        hdr_cells[3].text = "Upper CI"
+                        
+                        for cell in hdr_cells:
+                            cell.paragraphs[0].runs[0].font.bold = True
+                            cell.paragraphs[0].runs[0].font.size = Pt(10)
+
+                        for _, row in st.session_state.forecast_results.head(10).iterrows():
+                            row_cells = forecast_table.add_row().cells
+                            row_cells[0].text = str(row["Date"].date())
+                            row_cells[1].text = f"{row['Forecast']:.2f}"
+                            row_cells[2].text = f"{row['Lower_CI']:.2f}"
+                            row_cells[3].text = f"{row['Upper_CI']:.2f}"
+                            for cell in row_cells: # Set data cell font
+                                cell.paragraphs[0].runs[0].font.size = Pt(9)
+                        document.add_paragraph("\n")
+
+                        # AI Report Section
+                        document.add_heading(f'4. AI Report ({st.session_state.report_language})', level=1)
+                        # Split AI report into paragraphs
+                        for para_text in st.session_state.ai_report.split('\n\n'): # Split by double newline for paragraphs
+                            if para_text.strip():
+                                document.add_paragraph(para_text.strip())
+                        document.add_paragraph("\n")
+                        
+                        # Save document to a BytesIO object
+                        doc_buffer = io.BytesIO()
+                        document.save(doc_buffer)
+                        doc_buffer.seek(0) # Rewind the buffer
+
+                        # Display download button
+                        docx_placeholder.download_button(
+                            label="Download Report (DOCX) Now", 
+                            data=doc_buffer, 
+                            file_name="deephydro_forecast_report.docx", 
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", 
+                            key="docx_download_final_btn", 
+                            use_container_width=True
+                        )
+                        st.success("Word document ready. Click download button.")
+                        if firebase_initialized: log_visitor_activity("Main Area", "download_docx_success")
+                    except Exception as docx_err:
+                        st.error(f"Failed to generate Word document: {docx_err}")
+                        import traceback; st.error(traceback.format_exc())
+                        if firebase_initialized: log_visitor_activity("Main Area", "download_docx_failure")
+        else: # If AI Report is not generated, hide the download button
+            st.info("Generate AI Report first to enable DOCX download.")
+    else: 
+        st.info("Click 'Generate AI Report' (sidebar) after a forecast.")
+
 
 # AI Chatbot Tab
 with tabs[5]:
@@ -1639,7 +1651,6 @@ with tabs[6]:
     if firebase_initialized: log_visitor_activity("Tab: Admin Analytics", "view")
     render_admin_analytics()
 
-# Synchronize tab selection
-if st.session_state.active_tab is not None and active_tab_index != st.session_state.active_tab:
-    tabs[st.session_state.active_tab].button("Refresh Tab", key=f"refresh_tab_{st.session_state.active_tab}", on_click=lambda: st.session_state.update(active_tab=st.session_state.active_tab))
+# Note: st.session_state.active_tab is now directly linked to the `active_tab` parameter of st.tabs
+# No need for a separate button to refresh tab. The st.rerun() calls handle it.
 
