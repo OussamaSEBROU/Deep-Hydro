@@ -9,6 +9,7 @@ from tensorflow.keras.models import Sequential, load_model
 from tensorflow.keras.layers import LSTM, Dropout, Dense
 from tensorflow.keras.callbacks import EarlyStopping
 import plotly.graph_objects as go
+from fpdf import FPDF
 import google.generativeai as genai
 import io
 import base64
@@ -23,12 +24,7 @@ import requests
 import plotly.express as px
 from dotenv import load_dotenv
 import hashlib
-import streamlit.components.v1 as components 
-import matplotlib.pyplot as plt 
-from statsmodels.graphics.tsaplots import plot_acf 
-from docx import Document 
-from docx.shared import Inches, Pt 
-from docx.enum.text import WD_ALIGN_PARAGRAPH 
+import streamlit.components.v1 as components # Import components
 
 # --- Constants ---
 # ADVANCED_FEATURE_LIMIT removed as features are now unlimited.
@@ -126,7 +122,7 @@ def get_session_id():
     """Create or retrieve a unique session ID."""
     if 'session_id' not in st.session_state:
         st.session_state.session_id = str(uuid.uuid4())
-    return st.session_id
+    return st.session_state.session_id
 
 def log_visitor_activity(page_name, action="page_view", feature_used=None):
     """Log visitor activity to Firebase."""
@@ -142,7 +138,7 @@ def log_visitor_activity(page_name, action="page_view", feature_used=None):
         session_id = get_session_id()
         user_agent = st.session_state.get('user_agent', 'Unknown')
         ip_address = get_client_ip() 
-
+        # is_authenticated is no longer relevant without Google Auth, setting to False
         is_authenticated = False 
 
         log_data = {
@@ -156,6 +152,7 @@ def log_visitor_activity(page_name, action="page_view", feature_used=None):
             'feature_used': feature_used,
             'session_id': session_id,
             'user_agent': user_agent,
+            # google_email is no longer relevant
         }
         ref.child(log_id).set(log_data)
     except Exception as e:
@@ -241,8 +238,7 @@ def render_admin_analytics():
     if not st.session_state.admin_authenticated:
         st.info("Admin access required.")
         admin_password = st.text_input("Admin Password", type="password", key="admin_pass_input")
-        # Added a login button explicitly
-        if st.button("Login", key="admin_login_btn", use_container_width=True): 
+        if st.button("Login", key="admin_login_btn"):
             correct_password = os.getenv("ADMIN_PASSWORD", "admin123")
             if admin_password == correct_password:
                 st.session_state.admin_authenticated = True
@@ -323,24 +319,21 @@ def get_custom_css():
     .sidebar h2 {
         font-size: 1.2rem;
     }
-    /* ALL sidebar buttons styling - RED */
-    /* This rule will target all st.button elements within the sidebar */
-    .stSidebar .stButton > button {
-        background-color: #FF4B4B !important; /* Red color, !important to override */
-        color: white !important;
-        border: 1px solid #FF4B4B !important;
+    /* Style for sidebar buttons - RED COLOR */
+    .sidebar .stButton>button {
         border-radius: 4px;
         font-weight: 500;
         transition: all 0.3s;
         padding: 0.5rem 1rem;
+        background-color: #E74C3C; /* Red color for sidebar buttons */
+        color: white; /* White text on red background */
+        border: 1px solid #E74C3C; /* Red border */
     }
-    .stSidebar .stButton > button:hover {
-        background-color: #e03e3e !important; /* Darker red on hover */
-        border-color: #e03e3e !important;
-        box-shadow: 0 2px 5px rgba(255,75,75,0.4) !important; /* More pronounced shadow */
-        transform: translateY(-1px) !important; /* Slight lift */
+    .sidebar .stButton>button:hover {
+        opacity: 0.9;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        transform: translateY(-1px); /* Slight lift on hover */
     }
-
     .sidebar .stFileUploader, .sidebar .stSelectbox, .sidebar .stNumberInput, .sidebar .stCheckbox {
         margin-bottom: 0.8rem; /* Consistent spacing */
     }
@@ -349,7 +342,7 @@ def get_custom_css():
     }
     .sidebar .stExpander {
         border: none;
-        box_shadow: none;
+        box-shadow: none;
         background-color: transparent;
     }
     .sidebar .stExpander header {
@@ -408,9 +401,7 @@ def get_custom_css():
         margin-bottom: 0.5rem;
     }
 
-    /* Primary buttons outside sidebar - blue */
-    /* This rule ensures buttons in the main area remain blue unless specifically overridden */
-    .stButton:not(.stSidebar .stButton) > button { 
+    .stButton > button { 
         border-radius: 8px; /* Slightly more rounded buttons */
         font-weight: 600; /* Bolder button text */
         transition: all 0.3s ease-in-out; 
@@ -419,13 +410,13 @@ def get_custom_css():
         background-color: var(--primary-color);
         color: white; /* White text on primary background */
     }
-    .stButton:not(.stSidebar .stButton) > button:hover { 
+    .stButton > button:hover { 
         opacity: 0.9; 
-        box_shadow: 0 4px 12px rgba(0,0,0,0.1); /* More pronounced shadow on hover */
+        box-shadow: 0 4px 12px rgba(0,0,0,0.1); /* More pronounced shadow on hover */
         transform: translateY(-2px); /* Slight lift effect */
     }
 
-    /* Style for download buttons (e.g., CSV/XLSX) if different styling is desired) */
+    /* Style for secondary buttons (e.g., download buttons if different styling is desired) */
     .stDownloadButton > button {
         background-color: var(--background-color);
         color: var(--primary-color);
@@ -441,7 +432,7 @@ def get_custom_css():
         border-radius: 12px; /* More rounded cards */
         padding: 1.5rem; /* Increased card padding */
         margin-bottom: 1.5rem; /* More space between cards */
-        box_shadow: 0 4px 12px rgba(0,0,0,0.08); /* Stronger, softer shadow */
+        box-shadow: 0 4px 12px rgba(0,0,0,0.08); /* Stronger, softer shadow */
         background-color: var(--secondary-background-color); /* Use secondary background for cards */
         border: 1px solid rgba(128, 128, 128, 0.1); /* Subtle border */
     }
@@ -477,7 +468,7 @@ def get_custom_css():
         background-color: #555; 
         color: white; 
         z-index: 10; 
-        box_shadow: 0 2px 4px rgba(0,0,0,0.2);
+        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
     }
     .chat-message:active .copy-tooltip { display: block; }
     .stTabs [data-baseweb="tab-list"] { 
@@ -519,7 +510,7 @@ def get_custom_css():
         border-left: 8px solid var(--primary-color); /* Thicker blue border */
         background-color: var(--secondary-background-color); 
         color: var(--text-color);
-        box_shadow: 0 6px 20px rgba(0,0,0,0.15); /* Stronger intro shadow */
+        box-shadow: 0 6px 20px rgba(0,0,0,0.15); /* Stronger intro shadow */
     }
     .app-intro h3 {
         font-size: 1.8rem;
@@ -933,12 +924,10 @@ def get_gemini_chat_response(user_query, chat_hist, hist_df, forecast_df, metric
     if not gemini_configured: return "AI chat disabled. Configure Gemini API Key."
     if hist_df is None or forecast_df is None or metrics is None: return "Error: Insufficient context for AI chat."
     try:
-        # Refined persona and removal of intro phrases
         context_parts = [
-            "You are an experienced hydrogeologist and data analyst with over 10 years of experience in groundwater analysis and predictive modeling.",
-            "Your task is to interpret the following groundwater data and forecasts.",
+            "You are a senior AI and hydrogeology expert with over 20 years of experience in groundwater analysis and predictive modeling.",
+            "Your task is to interpret the following groundwater data and forecasts, and provide a professional engineering-style report.",
             "**IMPORTANT: Do NOT discuss internal AI model mechanics. Focus only on data interpretation, patterns, trends, uncertainties, and implications for groundwater behavior.**",
-            "**Do NOT add any introductory phrases before your answer.** Start directly with the analysis.",
             "",
             "### Historical Groundwater Summary:",
             hist_df["Level"].describe().to_string(),
@@ -952,36 +941,24 @@ def get_gemini_chat_response(user_query, chat_hist, hist_df, forecast_df, metric
             ai_report if ai_report else "(No prior AI report available.)",
             "",
             "### Instructions:",
-            "- Provide insights from an experienced hydrogeologist and data analyst (10 years experience).",
+            "- Write in the style of a senior data analyst or hydrogeological engineer's report.",
             "- Identify trends, anomalies, and seasonal patterns in groundwater level data.",
             "- Explain the forecast ranges (CI) and what they imply for groundwater conditions.",
             "- Compare historical and forecast data to infer changes in groundwater behavior.",
             "- Suggest potential implications for resource management, policy, or risk.",
-            "- Structure your response directly, without an introduction.",
-            "- Keep responses conversational but highly professional and data-driven, like an expert providing insights.",
+            "- Structure the output as: Executive Summary, Data Insights, Forecast Interpretation, Recommendations.",
             "",
             "### Previous Conversation (for context):"
         ]
         for sender, message in chat_hist[-6:]: context_parts.append(f"{sender}: {message}")
-        context_parts.append(f"User: {user_query}"); context_parts.append("AI:") 
+        context_parts.append(f"User: {user_query}"); context_parts.append("AI:")
         context = "\n".join(context_parts)
         
         response = gemini_model_chat.generate_content(context)
-        forbidden_terms = ["lstm", "long short-term memory", "epoch", "layer", "dropout", "adam optimizer", "sequence length", "as an AI model", "I am an AI", "hello", "hi", "greetings", "certainly", "absolutely", "of course"]
+        forbidden_terms = ["lstm", "long short-term memory", "epoch", "layer", "dropout", "adam optimizer", "sequence length"]
         cleaned_text = response.text
         for term in forbidden_terms: cleaned_text = cleaned_text.replace(term, "[modeling technique]")
-        # Further refine to ensure no intros
-        if cleaned_text.lower().startswith(("hello", "hi", "greetings", "as an ai model", "i am an ai", "certainly", "absolutely", "of course")):
-            # Find the first sentence and remove it if it sounds like an intro
-            sentences = cleaned_text.split('.')
-            if len(sentences) > 1:
-                first_sentence_lower = sentences[0].strip().lower()
-                if any(intro_phrase in first_sentence_lower for intro_phrase in ["hello", "hi", "greetings", "as an ai model", "i am an ai", "certainly", "absolutely", "of course"]):
-                    cleaned_text = '.'.join(sentences[1:]).strip()
-            else: # If it's a single short sentence intro, try to remove it
-                if any(intro_phrase in cleaned_text.lower() for intro_phrase in ["hello", "hi", "greetings", "as an ai model", "i am an ai", "certainly", "absolutely", "of course"]):
-                    cleaned_text = "Analysis: " 
-        return cleaned_text.strip() 
+        return cleaned_text
     except Exception as e: st.error(f"Error in AI chat: {e}"); return f"Error: {e}"
 
 # --- Main Forecasting Pipeline --- 
@@ -1107,84 +1084,81 @@ def render_data_analysis_tab(cleaned_data, forecast_results):
     
     st.subheader("Historical Data Overview")
     st.dataframe(cleaned_data.describe().transpose())
-    st.write("This table provides a statistical summary of the uploaded historical groundwater level data, including count, mean, standard deviation, min/max values, and quartiles.")
 
     fig_hist = px.histogram(cleaned_data, x="Level", nbins=30, 
                             title="Distribution of Historical Groundwater Levels",
                             labels={"Level": "Groundwater Level"},
                             template="plotly_white")
     st.plotly_chart(fig_hist, use_container_width=True)
-    st.write("This histogram shows the frequency distribution of historical groundwater levels, helping to visualize common ranges and potential skewness.")
 
-    # Autocorrelation Plot for Historical Data
-    st.subheader("Autocorrelation of Historical Data")
-    try:
-        # Use Matplotlib for plot_acf, then convert to Plotly for consistency
-        fig_acf_mpl, ax_acf = plt.subplots(figsize=(10, 5))
-        plot_acf(cleaned_data["Level"], ax=ax_acf, lags=min(len(cleaned_data)//2 - 1, 50), title="Autocorrelation Function (ACF) of Historical Groundwater Levels")
-        ax_acf.set_xlabel("Lags")
-        ax_acf.set_ylabel("Autocorrelation Coefficient")
-        plt.tight_layout()
-        st.pyplot(fig_acf_mpl) # Streamlit can directly render Matplotlib figures
-        plt.close(fig_acf_mpl) # Close the Matplotlib figure to free memory
-        st.write("The Autocorrelation Function (ACF) plot helps identify patterns in the data over time, such as seasonality (peaks at regular intervals) or trends (slow decay).")
-    except Exception as e:
-        st.warning(f"Could not generate Autocorrelation plot: {e}. Ensure enough data points are available.")
+    # Rolling Mean and Standard Deviation for Historical Data
+    st.subheader("Historical Data Trends: Rolling Statistics")
+    window_size = st.slider("Select rolling window size (days/points)", min_value=7, max_value=90, value=30, key="rolling_window_slider")
     
-    # Rolling Statistics for Historical Data
-    st.subheader("Rolling Statistics of Historical Data")
-    if len(cleaned_data) > 30: # Need enough data for rolling window
+    if len(cleaned_data) >= window_size:
+        cleaned_data_rolling = cleaned_data.copy()
+        cleaned_data_rolling['Rolling Mean'] = cleaned_data_rolling['Level'].rolling(window=window_size).mean()
+        cleaned_data_rolling['Rolling Std'] = cleaned_data_rolling['Level'].rolling(window=window_size).std()
+
         fig_rolling = go.Figure()
-        window_size = min(30, len(cleaned_data) - 1)
-        rolling_mean = cleaned_data["Level"].rolling(window=window_size).mean()
-        rolling_std = cleaned_data["Level"].rolling(window=window_size).std()
-
-        fig_rolling.add_trace(go.Scatter(x=cleaned_data["Date"], y=cleaned_data["Level"], mode="lines", name="Original Level", line=dict(color="lightgray", width=0.5), opacity=0.7))
-        fig_rolling.add_trace(go.Scatter(x=cleaned_data["Date"], y=rolling_mean, mode="lines", name=f"Rolling Mean ({window_size} days)", line=dict(color="rgb(30, 144, 255)", width=2)))
-        fig_rolling.add_trace(go.Scatter(x=cleaned_data["Date"], y=rolling_std, mode="lines", name=f"Rolling Std Dev ({window_size} days)", line=dict(color="rgb(255, 127, 14)", dash='dash', width=1.5)))
-        fig_rolling.update_layout(title=f"Rolling Mean and Standard Deviation (Window: {window_size} days)",
-                                  xaxis_title="Date", yaxis_title="Groundwater Level",
-                                  hovermode="x unified", template="plotly_white")
+        fig_rolling.add_trace(go.Scatter(x=cleaned_data_rolling["Date"], y=cleaned_data_rolling["Level"],
+                                         mode="lines", name="Original Level", line=dict(color="lightgray", width=0.5)))
+        fig_rolling.add_trace(go.Scatter(x=cleaned_data_rolling["Date"], y=cleaned_data_rolling["Rolling Mean"],
+                                         mode="lines", name=f"Rolling Mean ({window_size} days)", line=dict(color="rgb(30, 144, 255)", width=2)))
+        fig_rolling.add_trace(go.Scatter(x=cleaned_data_rolling["Date"], y=cleaned_data_rolling["Rolling Std"],
+                                         mode="lines", name=f"Rolling Std Dev ({window_size} days)", line=dict(color="rgb(255, 127, 14)", dash='dash')))
+        fig_rolling.update_layout(title=f"Historical Groundwater Levels with Rolling Mean & Std Dev ({window_size}-point Window)",
+                                  xaxis_title="Date", yaxis_title="Groundwater Level", hovermode="x unified", template="plotly_white")
         st.plotly_chart(fig_rolling, use_container_width=True)
-        st.write("This plot shows the moving average and standard deviation, highlighting trends and changes in data variability over time.")
     else:
-        st.info("Not enough data for rolling statistics plot (requires at least 30 data points).")
+        st.info(f"Not enough data points ({len(cleaned_data)}) for a rolling window of {window_size}. Increase data or decrease window size.")
 
-    # Monthly Box Plot (if data spans multiple years)
-    if cleaned_data['Date'].dt.year.nunique() > 1:
-        st.subheader("Monthly Groundwater Level Distribution")
-        cleaned_data['Month'] = cleaned_data['Date'].dt.month_name()
-        month_order = ["January", "February", "March", "April", "May", "June", 
-                       "July", "August", "September", "October", "November", "December"]
-        cleaned_data['Month'] = pd.Categorical(cleaned_data['Month'], categories=month_order, ordered=True)
-        
-        fig_monthly_box = px.box(cleaned_data, x="Month", y="Level", 
-                                 title="Distribution of Groundwater Levels by Month",
-                                 labels={"Level": "Groundwater Level"},
-                                 template="plotly_white")
-        fig_monthly_box.update_layout(xaxis_title="Month", yaxis_title="Groundwater Level")
-        st.plotly_chart(fig_monthly_box, use_container_width=True)
-        st.write("This box plot shows the distribution of groundwater levels for each month across all years, indicating seasonal patterns and variability.")
+
+    # Extreme Values
+    st.subheader("Extreme Values in Historical Data")
+    min_level = cleaned_data['Level'].min()
+    max_level = cleaned_data['Level'].max()
+    min_date = cleaned_data.loc[cleaned_data['Level'].idxmin()]['Date'].strftime('%Y-%m-%d')
+    max_date = cleaned_data.loc[cleaned_data['Level'].idxmax()]['Date'].strftime('%Y-%m-%d')
+
+    col_min, col_max = st.columns(2)
+    with col_min:
+        st.metric("Minimum Level Recorded", f"{min_level:.2f}", help=f"Recorded on {min_date}")
+    with col_max:
+        st.metric("Maximum Level Recorded", f"{max_level:.2f}", help=f"Recorded on {max_date}")
+
+    st.subheader("Quantile Analysis for Historical Data")
+    quantiles_historical = cleaned_data['Level'].quantile([0.25, 0.5, 0.75]).to_frame(name='Historical Level')
+    quantiles_historical.index = ['25th Percentile (Q1)', '50th Percentile (Median)', '75th Percentile (Q3)']
+    st.dataframe(quantiles_historical)
+
 
     if forecast_results is not None:
         st.subheader("Forecasted Data Overview")
         st.dataframe(forecast_results[['Forecast', 'Lower_CI', 'Upper_CI']].describe().transpose())
-        st.write("This table provides a statistical summary of the forecasted groundwater levels, including the mean forecast and confidence intervals.")
 
         fig_forecast_hist = px.histogram(forecast_results, x="Forecast", nbins=30,
                                          title="Distribution of Forecasted Groundwater Levels",
                                          labels={"Forecast": "Forecasted Level"},
                                          template="plotly_white", color_discrete_sequence=[px.colors.qualitative.Plotly[1]]) # Orange color
         st.plotly_chart(fig_forecast_hist, use_container_width=True)
-        st.write("This histogram illustrates the distribution of the predicted groundwater levels over the forecast horizon.")
 
         st.subheader("Historical vs. Forecasted Data Comparison")
-        # Combine data for comparison plot
-        combined_df = pd.DataFrame({
+        # Combined Box Plot
+        combined_level_data = pd.DataFrame({
             'Level': pd.concat([cleaned_data['Level'], forecast_results['Forecast']]),
             'Type': ['Historical'] * len(cleaned_data) + ['Forecast'] * len(forecast_results)
         })
-        fig_combined_dist = px.histogram(combined_df, x="Level", color="Type", histnorm='probability density',
+        fig_boxplot = px.box(combined_level_data, x="Type", y="Level",
+                             title="Distribution Comparison: Historical vs. Forecasted Levels",
+                             labels={"Level": "Groundwater Level", "Type": "Data Type"},
+                             color="Type",
+                             color_discrete_map={'Historical': "rgb(30, 144, 255)", 'Forecast': "rgb(255, 127, 14)"},
+                             template="plotly_white")
+        st.plotly_chart(fig_boxplot, use_container_width=True)
+
+        # Combined Histogram (Density)
+        fig_combined_dist = px.histogram(combined_level_data, x="Level", color="Type", histnorm='probability density',
                                         barmode='overlay', opacity=0.7,
                                         title="Density Distribution: Historical vs. Forecasted Levels",
                                         labels={"Level": "Groundwater Level", "count": "Density"},
@@ -1192,7 +1166,6 @@ def render_data_analysis_tab(cleaned_data, forecast_results):
                                         template="plotly_white")
         fig_combined_dist.update_layout(bargap=0.1)
         st.plotly_chart(fig_combined_dist, use_container_width=True)
-        st.write("This overlaid histogram compares the density distributions of historical and forecasted groundwater levels, showing how the predicted levels align or differ from past observations.")
         
         st.subheader("Key Statistical Differences")
         col1, col2, col3 = st.columns(3)
@@ -1205,7 +1178,11 @@ def render_data_analysis_tab(cleaned_data, forecast_results):
         with col3:
             st.metric("Historical Range", f"{cleaned_data['Level'].max() - cleaned_data['Level'].min():.2f}")
             st.metric("Forecast Range", f"{forecast_results['Forecast'].max() - forecast_results['Forecast'].min():.2f}")
-        st.write("These metrics highlight the central tendency, spread, and overall range differences between the historical and forecasted groundwater levels.")
+
+        st.subheader("Quantile Analysis for Forecasted Data")
+        quantiles_forecasted = forecast_results['Forecast'].quantile([0.25, 0.5, 0.75]).to_frame(name='Forecasted Level')
+        quantiles_forecasted.index = ['25th Percentile (Q1)', '50th Percentile (Median)', '75th Percentile (Q3)']
+        st.dataframe(quantiles_forecasted)
 
     else:
         st.info("Run a forecast to see combined data analysis.")
@@ -1281,8 +1258,10 @@ with st.sidebar:
     mc_iterations_sidebar = st.number_input("MC Dropout Iterations (C.I.)", min_value=20, max_value=500, value=100, step=10, key="mc_iter_in")
     forecast_horizon_sidebar = st.number_input("Forecast Horizon (steps)", min_value=1, max_value=100, value=12, step=1, key="horizon_in")
 
-    # Run Forecast Button (clicking this will switch to Forecast Results tab)
-    if st.button("Run Forecast", key="run_forecast_main_btn", use_container_width=True):
+    # Run Forecast Button
+    run_forecast_button = st.button("Run Forecast", key="run_forecast_main_btn", use_container_width=True)
+    if run_forecast_button:
+        # Feature access is now unlimited, so no check needed
         st.session_state.run_forecast_triggered = True
         if st.session_state.cleaned_data is not None:
             if model_choice == "Upload Custom .h5 Model" and not custom_model_file_obj_sidebar:
@@ -1319,8 +1298,10 @@ with st.sidebar:
     st.header("3. AI Analysis")
     st.session_state.report_language = st.selectbox("Report Language", ["English", "French"], key="report_lang_select", disabled=not gemini_configured)
     
-    # Generate AI Report Button (clicking this will switch to AI Report tab)
-    if st.button("Generate AI Report", key="show_report_btn", disabled=not gemini_configured, use_container_width=True):
+    # Generate AI Report Button
+    generate_report_button = st.button("Generate AI Report", key="show_report_btn", disabled=not gemini_configured, use_container_width=True)
+    if generate_report_button:
+        # Feature access is now unlimited, no check needed
         if not gemini_configured: st.error("AI Report disabled. Configure Gemini API Key.")
         elif st.session_state.cleaned_data is not None and st.session_state.forecast_results is not None and st.session_state.evaluation_metrics is not None:
             if firebase_initialized: log_visitor_activity("Sidebar", "generate_report", feature_used='AI Report')
@@ -1331,20 +1312,115 @@ with st.sidebar:
                 )
             if st.session_state.ai_report and not st.session_state.ai_report.startswith("Error:"):
                 st.success("AI report generated.")
-                st.session_state.active_tab = 4 # Switch to AI Report tab
+                st.session_state.active_tab = 4 # Switch to AI Report tab (now index 4)
                 st.rerun()
             else: st.error(f"Failed to generate AI report. {st.session_state.ai_report}")
         else: st.error("Data, forecast, and metrics needed. Run forecast first.")
 
-    # AI Assistant Activate Chat Button (clicking this will switch to AI Chatbot tab)
+    # Download PDF Button
+    if st.button("Download Report (PDF)", key="download_report_btn", use_container_width=True):
+        if firebase_initialized: log_visitor_activity("Sidebar", "download_pdf")
+        if st.session_state.forecast_results is not None and st.session_state.evaluation_metrics is not None and st.session_state.ai_report is not None and st.session_state.forecast_plot_fig is not None:
+            with st.spinner("Generating PDF report..."):
+                try:
+                    pdf = FPDF(); pdf.add_page()
+                    
+                    # Set font for professional look to standard Arial to avoid font issues
+                    report_font = "Arial" 
+                    pdf.set_font(report_font, "B", size=16)
+                    pdf.cell(0, 10, txt="DeepHydro AI Forecasting Report", new_x="LMARGIN", new_y="NEXT", align="C")
+                    pdf.set_font(report_font, size=10)
+                    pdf.cell(0, 7, txt=f"Date Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}", new_x="LMARGIN", new_y="NEXT", align="C")
+                    pdf.ln(10) # Add some space
+
+                    # Forecast Plot
+                    pdf.set_font(report_font, "B", size=12); pdf.cell(0, 10, txt="1. Forecast Visualization", new_x="LMARGIN", new_y="NEXT"); pdf.ln(1)
+                    plot_filename = "forecast_plot.png"
+                    try:
+                        if st.session_state.forecast_plot_fig:
+                            # Save plot with higher scale for better quality in PDF
+                            st.session_state.forecast_plot_fig.write_image(plot_filename, scale=3) 
+                            pdf.image(plot_filename, x=10, y=pdf.get_y(), w=190) # Adjust x, y, w for layout
+                            pdf.ln(125) # Space after image, adjust based on image height
+                        else: pdf.multi_cell(0, 10, txt="[Forecast plot unavailable]")
+                    except Exception as img_err:
+                        st.warning(f"Could not embed plot image in PDF: {img_err}.")
+                        pdf.multi_cell(0, 10, txt=f"[Error embedding plot: {img_err}]")
+                    finally: 
+                        if os.path.exists(plot_filename): os.remove(plot_filename)
+                    pdf.ln(5) # Space after section
+
+                    # Model Evaluation Metrics
+                    pdf.set_font(report_font, "B", size=12); pdf.cell(0, 10, txt="2. Model Evaluation Metrics", new_x="LMARGIN", new_y="NEXT"); pdf.ln(1)
+                    pdf.set_font(report_font, size=10)
+                    metrics_data = [
+                        ["Metric", "Value"],
+                        ["RMSE", f"{st.session_state.evaluation_metrics.get('RMSE', np.nan):.4f}" if not np.isnan(st.session_state.evaluation_metrics.get('RMSE', np.nan)) else "N/A"],
+                        ["MAE", f"{st.session_state.evaluation_metrics.get('MAE', np.nan):.4f}" if not np.isnan(st.session_state.evaluation_metrics.get('MAE', np.nan)) else "N/A"],
+                        ["MAPE", f"{st.session_state.evaluation_metrics.get('MAPE', np.nan):.2f}%" if not np.isnan(st.session_state.evaluation_metrics.get('MAPE', np.nan)) else "N/A"]
+                    ]
+                    # Table headers
+                    pdf.set_fill_color(220, 220, 220) # Light gray for header background
+                    pdf.set_font(report_font, "B", size=9)
+                    pdf.cell(50, 7, txt=metrics_data[0][0], border=1, fill=True)
+                    pdf.cell(50, 7, txt=metrics_data[0][1], border=1, new_x="LMARGIN", new_y="NEXT", fill=True)
+                    # Table data
+                    pdf.set_font(report_font, size=9)
+                    for row_data in metrics_data[1:]:
+                        pdf.cell(50, 6, txt=row_data[0], border=1)
+                        pdf.cell(50, 6, txt=row_data[1], border=1, new_x="LMARGIN", new_y="NEXT")
+                    pdf.ln(5)
+
+                    # Forecast Data Table
+                    pdf.set_font(report_font, "B", size=12); pdf.cell(0, 10, txt="3. Forecast Data (First 10 rows)", new_x="LMARGIN", new_y="NEXT"); pdf.ln(1)
+                    pdf.set_font(report_font, size=8); 
+                    col_widths = [35, 35, 35, 35] # Keep consistent widths
+                    
+                    pdf.set_fill_color(220, 220, 220) # Light gray for header background
+                    pdf.set_font(report_font, "B", size=9)
+                    pdf.cell(col_widths[0], 7, txt="Date", border=1, fill=True); pdf.cell(col_widths[1], 7, txt="Forecast", border=1, fill=True); pdf.cell(col_widths[2], 7, txt="Lower CI", border=1, fill=True); pdf.cell(col_widths[3], 7, txt="Upper CI", border=1, new_x="LMARGIN", new_y="NEXT", fill=True)
+                    
+                    pdf.set_font(report_font, size=8)
+                    for _, row in st.session_state.forecast_results.head(10).iterrows():
+                        pdf.cell(col_widths[0], 6, txt=str(row["Date"].date()), border=1)
+                        pdf.cell(col_widths[1], 6, txt=f"{row['Forecast']:.2f}", border=1)
+                        pdf.cell(col_widths[2], 6, txt=f"{row['Lower_CI']:.2f}", border=1)
+                        pdf.cell(col_widths[3], 6, txt=f"{row['Upper_CI']:.2f}", border=1, new_x="LMARGIN", new_y="NEXT")
+                    pdf.ln(5)
+                    
+                    # AI Report Section
+                    pdf.set_font(report_font, "B", size=12); pdf.cell(0, 10, txt=f"4. AI Report ({st.session_state.report_language})", new_x="LMARGIN", new_y="NEXT"); pdf.ln(1)
+                    pdf.set_font(report_font, size=10)
+                    pdf.multi_cell(0, 5, txt=st.session_state.ai_report)
+                    pdf.ln(5)
+                    
+                    # Footer
+                    pdf.set_y(-15) # Position at 1.5 cm from bottom
+                    pdf.set_font(report_font, 'I', 8) # Italic, 8pt
+                    pdf.cell(0, 10, f'Page {pdf.page_no()}/{{nb}} - Generated by DeepHydro AI', 0, 0, 'C')
+                    
+                    pdf_output_bytes = pdf.output(dest="S").encode("latin-1")
+                    st.download_button(label="Download PDF Now", data=pdf_output_bytes, file_name="deephydro_forecast_report.pdf", mime="application/pdf", key="pdf_download_final_btn", use_container_width=True)
+                    st.success("PDF ready. Click download button.")
+                    if firebase_initialized: log_visitor_activity("Sidebar", "download_pdf_success")
+                except Exception as pdf_err:
+                    st.error(f"Failed to generate PDF: {pdf_err}")
+                    import traceback; st.error(traceback.format_exc())
+                    if firebase_initialized: log_visitor_activity("Sidebar", "download_pdf_failure")
+        else: st.error("Required data missing. Run forecast and generate AI report first.")
+
+    st.header("4. AI Assistant")
+    # Activate Chat Button
     chat_button_label = "Deactivate Chat" if st.session_state.chat_active else "Activate Chat"
-    if st.button(chat_button_label, key="chat_ai_btn_sidebar", use_container_width=True, disabled=not gemini_configured):
+    activate_chat_button = st.button(chat_button_label, key="chat_ai_btn", disabled=not gemini_configured, use_container_width=True)
+    if activate_chat_button:
         if st.session_state.chat_active:
             st.session_state.chat_active = False; st.session_state.chat_history = []
             if firebase_initialized: log_visitor_activity("Sidebar", "deactivate_chat")
             st.rerun()
         else:
-            st.session_state.chat_active = True; st.session_state.active_tab = 5 # Switch to AI Chatbot tab
+            # Feature access is now unlimited, no check needed
+            st.session_state.chat_active = True; st.session_state.active_tab = 5 # Changed to 5 for AI Chatbot
             if firebase_initialized: log_visitor_activity("Sidebar", "activate_chat", feature_used='AI Chat')
             st.rerun()
 
@@ -1356,11 +1432,11 @@ with st.sidebar:
     st.markdown("© 2025 DeepHydro AI Team")
     st.markdown('</div>', unsafe_allow_html=True)
     
-    # Admin Access (clicking this will switch to Admin Analytics tab)
+    # Admin Access
     st.header("5. Admin")
-    if st.button("Analytics Dashboard", key="admin_analytics_btn_sidebar", use_container_width=True):
+    if st.button("Analytics Dashboard", key="admin_analytics_btn", use_container_width=True):
         if firebase_initialized: log_visitor_activity("Sidebar", "access_admin")
-        st.session_state.active_tab = 6 # Switch to Admin Analytics tab
+        st.session_state.active_tab = 6 # Changed to 6 for Admin Analytics
         st.rerun()
 
 # --- Main Application Area --- 
@@ -1375,34 +1451,11 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# Handle data upload
-if uploaded_data_file is not None:
-    # Corrected the variable name from `uploaded_file` to `uploaded_data_file`
-    if st.session_state.get("uploaded_data_filename") != uploaded_data_file.name:
-        st.session_state.uploaded_data_filename = uploaded_data_file.name
-        with st.spinner("Loading and cleaning data..."): 
-            cleaned_df_result = load_and_clean_data(uploaded_data_file.getvalue())
-        if cleaned_df_result is not None:
-            st.session_state.cleaned_data = cleaned_df_result
-            # Reset results
-            st.session_state.forecast_results = None; st.session_state.evaluation_metrics = None
-            st.session_state.training_history = None; st.session_state.ai_report = None
-            st.session_state.chat_history = []; st.session_state.scaler_object = None
-            st.session_state.forecast_plot_fig = None
-            st.session_state.model_sequence_length = STANDARD_MODEL_SEQUENCE_LENGTH
-            st.session_state.run_forecast_triggered = False
-            if firebase_initialized: log_visitor_activity("Data Upload", "upload_success")
-            st.rerun()
-        else:
-            st.session_state.cleaned_data = None
-            st.error("Data loading failed. Check file format/content.")
-            if firebase_initialized: log_visitor_activity("Data Upload", "upload_failure")
-
-# Define tabs (Removed 'key' and 'active_tab' argument to fix TypeError)
+# Define tabs
+# Updated tab_titles to reflect new order
 tab_titles = ["Data Preview", "Forecast Results", "Model Evaluation", "Data Analysis & Statistics", "AI Report", "AI Chatbot", "Admin Analytics"]
-# Removed active_tab = st.session_state.active_tab to fix TypeError.
-# This means the tabs will default to the first one on rerun, and you'll need to click them.
-tabs = st.tabs(tab_titles) 
+tabs = st.tabs(tab_titles)
+active_tab_index = st.session_state.get("active_tab", 0)
 
 # --- Tab Content --- 
 
@@ -1479,135 +1532,21 @@ with tabs[2]:
     elif st.session_state.run_forecast_triggered: st.warning("Forecast run attempted, but no evaluation metrics available.")
     else: st.info("Run a forecast (sidebar) to see evaluation.")
 
-# Data Analysis & Statistics Tab
+# Data Analysis & Statistics Tab (now at index 3)
 with tabs[3]:
     if firebase_initialized: log_visitor_activity("Tab: Data Analysis & Statistics", "view")
     render_data_analysis_tab(st.session_state.cleaned_data, st.session_state.forecast_results)
 
-# AI Report Tab
+# AI Report Tab (now at index 4)
 with tabs[4]:
     if firebase_initialized: log_visitor_activity("Tab: AI Report", "view")
     st.header("AI-Generated Scientific Report")
     if not gemini_configured: st.warning("AI features disabled. Configure Gemini API Key.")
     if st.session_state.ai_report: 
         st.markdown(f'<div class="chat-message ai-message">{st.session_state.ai_report}<span class="copy-tooltip">Copied!</span></div>', unsafe_allow_html=True)
+    else: st.info("Click 'Generate AI Report' (sidebar) after a forecast.")
 
-        # Download Word Report Button - Moved from Sidebar to Main Area (AI Report Tab)
-        st.subheader("Download Report")
-        # Check if necessary data for report generation is available
-        if st.session_state.forecast_results is not None and \
-           st.session_state.evaluation_metrics is not None and \
-           st.session_state.ai_report is not None and \
-           st.session_state.forecast_plot_fig is not None:
-            
-            # Create a BytesIO object to store the document in memory
-            docx_buffer = io.BytesIO()
-            document = Document()
-            
-            # Set up default font for the document
-            style = document.styles['Normal']
-            font = style.font
-            font.name = 'Calibri' 
-            font.size = Pt(11)
-
-            # Title
-            document.add_heading('DeepHydro AI Forecasting Report', level=0)
-            document.add_paragraph(f"Date Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}")
-            document.add_paragraph("\n") 
-
-            # Forecast Visualization Section
-            document.add_heading('1. Forecast Visualization', level=1)
-            plot_filename = "forecast_plot.png"
-            try:
-                if st.session_state.forecast_plot_fig:
-                    st.session_state.forecast_plot_fig.write_image(plot_filename, scale=2) 
-                    document.add_picture(plot_filename, width=Inches(6.5)) 
-                    document.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER 
-                    document.add_paragraph("\n")
-                else:
-                    document.add_paragraph("[Forecast plot unavailable]")
-            except Exception as img_err:
-                document.add_paragraph(f"[Error embedding plot: {img_err}]")
-            finally:
-                if os.path.exists(plot_filename): os.remove(plot_filename) 
-
-            # Model Evaluation Metrics Section
-            document.add_heading('2. Model Evaluation Metrics', level=1)
-            metrics_table = document.add_table(rows=1, cols=2)
-            metrics_table.style = 'Table Grid' 
-            hdr_cells = metrics_table.rows[0].cells
-            hdr_cells[0].text = "Metric"
-            hdr_cells[1].text = "Value"
-            
-            for cell in hdr_cells:
-                cell.paragraphs[0].runs[0].font.bold = True
-                cell.paragraphs[0].runs[0].font.size = Pt(10)
-                
-            metrics_data = {
-                "RMSE": f"{st.session_state.evaluation_metrics.get('RMSE', np.nan):.4f}" if not np.isnan(st.session_state.evaluation_metrics.get('RMSE', np.nan)) else "N/A",
-                "MAE": f"{st.session_state.evaluation_metrics.get('MAE', np.nan):.4f}" if not np.isnan(st.session_state.evaluation_metrics.get('MAE', np.nan)) else "N/A",
-                "MAPE": f"{st.session_state.evaluation_metrics.get('MAPE', np.nan):.2f}%" if not np.isnan(st.session_state.evaluation_metrics.get('MAPE', np.nan)) else "N/A"
-            }
-            for metric, value in metrics_data.items():
-                row_cells = metrics_table.add_row().cells
-                row_cells[0].text = metric
-                row_cells[1].text = value
-                for cell in row_cells: 
-                    cell.paragraphs[0].runs[0].font.size = Pt(9)
-            document.add_paragraph("\n")
-
-            # Forecast Data Table Section
-            document.add_heading('3. Forecast Data (First 10 rows)', level=1)
-            forecast_table = document.add_table(rows=1, cols=4)
-            forecast_table.style = 'Table Grid'
-            hdr_cells = forecast_table.rows[0].cells
-            hdr_cells[0].text = "Date"
-            hdr_cells[1].text = "Forecast"
-            hdr_cells[2].text = "Lower CI"
-            hdr_cells[3].text = "Upper CI"
-            
-            for cell in hdr_cells:
-                cell.paragraphs[0].runs[0].font.bold = True
-                cell.paragraphs[0].runs[0].font.size = Pt(10)
-
-            for _, row in st.session_state.forecast_results.head(10).iterrows():
-                row_cells = forecast_table.add_row().cells
-                row_cells[0].text = str(row["Date"].date())
-                row_cells[1].text = f"{row['Forecast']:.2f}"
-                row_cells[2].text = f"{row['Lower_CI']:.2f}"
-                row_cells[3].text = f"{row['Upper_CI']:.2f}"
-                for cell in row_cells: 
-                    cell.paragraphs[0].runs[0].font.size = Pt(9)
-            document.add_paragraph("\n")
-
-            # AI Report Section
-            document.add_heading(f'4. AI Report ({st.session_state.report_language})', level=1)
-            for para_text in st.session_state.ai_report.split('\n\n'): 
-                if para_text.strip():
-                    document.add_paragraph(para_text.strip())
-            document.add_paragraph("\n")
-            
-            # Save document to BytesIO
-            document.save(docx_buffer)
-            docx_buffer.seek(0) # Rewind buffer for download
-            
-            st.download_button(
-                label="Download Report (DOCX)", 
-                data=docx_buffer, 
-                file_name="deephydro_forecast_report.docx", 
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", 
-                key="docx_download_final_btn_tab", 
-                use_container_width=True
-            )
-            st.success("Word document generated. Click the button above to download.")
-            if firebase_initialized: log_visitor_activity("Main Area", "docx_download_success")
-        else: 
-            st.info("Run a forecast and generate AI report first to enable DOCX download.")
-    else: 
-        st.info("Click 'Generate AI Report' (sidebar) after a forecast.")
-
-
-# AI Chatbot Tab
+# AI Chatbot Tab (now at index 5)
 with tabs[5]:
     if firebase_initialized: log_visitor_activity("Tab: AI Chatbot", "view")
     st.header("AI Chatbot Assistant")
@@ -1639,8 +1578,12 @@ with tabs[5]:
     else:
         st.info("Click 'Activate Chat' (sidebar) after a forecast." if gemini_configured else "AI Chat disabled.")
 
-# Admin Analytics Tab
+# Admin Analytics Tab (now at index 6)
 with tabs[6]:
     if firebase_initialized: log_visitor_activity("Tab: Admin Analytics", "view")
     render_admin_analytics()
+
+# Synchronize tab selection
+if st.session_state.active_tab is not None and active_tab_index != st.session_state.active_tab:
+    tabs[st.session_state.active_tab].button("Refresh Tab", key=f"refresh_tab_{st.session_state.active_tab}", on_click=lambda: st.session_state.update(active_tab=st.session_state.active_tab))
 
